@@ -183,11 +183,11 @@ class PokerGame:
 
         # Evaluate hand strength
         if len(community_cards) < 5:
-            community_cards_copy = community_cards + self.deck.deal(5 - len(community_cards))
+            # Only evaluate existing cards, don't copy deck
+            best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards)
         else:
-            community_cards_copy = community_cards
+            best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards)
 
-        best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards_copy)
         hand_strength = HandEvaluator.HAND_RANKS[best_hand[0]] if best_hand else 1
 
         # Simple strategy
@@ -306,20 +306,27 @@ class PokerGame:
             
             current_player_idx = (current_player_idx + 1) % len(self.players)
 
+    def reset_round_bets(self):
+        """Reset player bets for next betting round"""
+        for player in self.players:
+            player.total_bet_this_round = 0
+        self.current_bet = 0
+
     def determine_winner(self):
-        """Determine winner and award pot"""
+        """Determine winner and return winner info"""
         active_players = [p for p in self.players if not p.is_folded]
 
         if len(active_players) == 1:
             winner = active_players[0]
             print(f"\nPlayer {winner.player_id} wins ${self.pot}!")
             winner.stack += self.pot
-            return
+            return {"winners": [winner], "pot": self.pot, "hand_type": "Opponents Folded"}
 
         # Compare hands
         best_hand_rank = 0
         best_tiebreaker = None
         winners = []
+        winning_hand_type = ""
 
         for player in active_players:
             best_hand = HandEvaluator.find_best_hand(player.hole_cards, self.community_cards)
@@ -336,6 +343,7 @@ class PokerGame:
                 best_hand_rank = hand_rank
                 best_tiebreaker = tiebreaker
                 winners = [player]
+                winning_hand_type = hand_type
             elif hand_rank == best_hand_rank and tiebreaker == best_tiebreaker:
                 winners.append(player)
 
@@ -343,6 +351,7 @@ class PokerGame:
             winner = winners[0]
             print(f"\nPlayer {winner.player_id} wins ${self.pot}!")
             winner.stack += self.pot
+            return {"winners": [winner], "pot": self.pot, "hand_type": winning_hand_type}
         else:
             # Split pot among winners
             split_amount = self.pot // len(winners)
@@ -352,6 +361,7 @@ class PokerGame:
                 amount = split_amount + (1 if i == 0 else 0)  # Give remainder to first winner
                 winner.stack += amount
                 print(f"Player {winner.player_id} gets ${amount}")
+            return {"winners": winners, "pot": self.pot, "hand_type": winning_hand_type}
 
     def play_hand(self):
         """Play a single hand of poker"""
@@ -385,9 +395,7 @@ class PokerGame:
             return
 
         # Reset for next round
-        for player in self.players:
-            player.total_bet_this_round = 0
-        self.current_bet = 0
+        self.reset_round_bets()
 
         # Flop
         self.community_cards = self.deck.deal(3)
@@ -400,9 +408,7 @@ class PokerGame:
             return
 
         # Reset for next round
-        for player in self.players:
-            player.total_bet_this_round = 0
-        self.current_bet = 0
+        self.reset_round_bets()
 
         # Turn
         self.community_cards += self.deck.deal(1)
@@ -415,9 +421,7 @@ class PokerGame:
             return
 
         # Reset for next round
-        for player in self.players:
-            player.total_bet_this_round = 0
-        self.current_bet = 0
+        self.reset_round_bets()
 
         # River
         self.community_cards += self.deck.deal(1)
