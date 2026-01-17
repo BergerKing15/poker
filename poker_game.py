@@ -1,5 +1,6 @@
 import random
 from itertools import combinations
+from typing import Optional, Tuple, List
 
 class Card:
     SUITS = ['Hearts', 'Diamonds', 'Clubs', 'Spades']
@@ -51,9 +52,9 @@ class HandEvaluator:
     def find_best_hand(hole_cards, community_cards):
         """Find the best 5-card hand from 7 cards (2 hole + 5 community)"""
         all_cards = hole_cards + community_cards
-        best_hand = None
+        best_hand: Optional[Tuple] = None
         best_rank = 0
-        best_tiebreaker = None
+        best_tiebreaker: Optional[Tuple] = None
 
         for combo in combinations(all_cards, 5):
             hand_info = HandEvaluator.evaluate_hand(list(combo))
@@ -61,7 +62,7 @@ class HandEvaluator:
             tiebreaker = hand_info[1]
             rank_value = HandEvaluator.HAND_RANKS[hand_type]
             
-            if rank_value > best_rank or (rank_value == best_rank and tiebreaker > best_tiebreaker):
+            if best_tiebreaker is None or rank_value > best_rank or (rank_value == best_rank and tiebreaker > best_tiebreaker):
                 best_rank = rank_value
                 best_tiebreaker = tiebreaker
                 best_hand = (hand_type, list(combo))
@@ -120,6 +121,7 @@ class Player:
         self.bet_amount = 0
         self.total_bet_this_round = 0
         self.is_folded = False
+        self.is_all_in = False
 
     def receive_cards(self, cards):
         self.hole_cards = cards
@@ -129,25 +131,110 @@ class Player:
         self.bet_amount = 0
         self.total_bet_this_round = 0
         self.is_folded = False
+        self.is_all_in = False
 
     def __repr__(self):
         return f"Player {self.player_id} (Stack: ${self.stack})"
 
 
 class PokerGame:
-    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10):
+    DEBUG = False  # Toggle for print output
+    
+    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10, use_bots=True):
         self.players = [Player(i, starting_stack) for i in range(num_players)]
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.pot = 0
-        self.community_cards = []
-        self.deck = None
+        self.community_cards: List[Card] = []
+        self.deck: Optional[Deck] = None
         self.button = 0
         self.current_bet = 0
         self.hand_number = 0
+        self.side_pots: List = []  # List of {amount, eligible_players}
+        self.total_bet_by_player = {}  # Track total bet amount per player for side pot calculation
+        self.pending_raise_amount = 0  # Temporary storage for bot raise amounts
+        
+        # Bot system
+        self.use_bots = use_bots
+        self.bots = {}  # Map player_id to PokerBot instance
+        
+        if use_bots:
+            self._initialize_bots(num_players)
+
+    def _assert_deck(self) -> Deck:
+        """Assert deck is initialized and return it"""
+        assert self.deck is not None, "Deck must be initialized before use"
+        return self.deck
+
+    def _initialize_bots(self, num_players: int):
+        """Initialize poker bots for AI players"""
+        try:
+            from poker_bot import PokerBot
+            
+            # Create mixed bot types for variety
+            bot_types = ["TAG", "LAG", "CTR", "NIT", "FISH"]
+            
+            for i in range(1, num_players):  # Player 0 is the human
+                bot_type = bot_types[(i - 1) % len(bot_types)]
+                self.bots[i] = PokerBot(i, bot_type)
+        except ImportError:
+            if self.DEBUG:
+                print("Warning: poker_bot module not found, using simple AI")
+            self.use_bots = False
+
+    def get_active_players(self) -> List:
+        """Get all active players (not folded, with stack > 0)"""
+        return [p for p in self.players if not p.is_folded and p.stack > 0]
+
+    def get_unfolded_players(self) -> List:
+        """Get all players who haven't folded"""
+        return [p for p in self.players if not p.is_folded]
+
+    def get_active_opponents(self, excluding_player) -> List:
+        """Get active players excluding the specified player"""
+        return [p for p in self.get_active_players() if p != excluding_player]
+
+    def get_unfolded_opponents(self, excluding_player) -> List:
+        """Get unfolded players excluding the specified player"""
+        return [p for p in self.get_unfolded_players() if p != excluding_player]
+
+    def create_side_pots(self):
+        """Create side pots based on all-in players' contributions"""
+        # Get all non-folded players sorted by their total bet
+        active_players = self.get_unfolded_players()
+        if len(active_players) <= 1:
+            return []
+        
+        # Sort by total bet amount (ascending)
+        bet_levels = sorted(set(p.total_bet_this_round for p in active_players))
+        
+        pots = []
+        previous_level = 0
+        
+        for level in bet_levels:
+            # Create pot for this level
+            eligible = [p for p in active_players if p.total_bet_this_round >= level]
+            
+            if not eligible:
+                continue
+                
+            pot_amount = (level - previous_level) * len(eligible)
+            
+            if pot_amount > 0:
+                pots.append({
+                    'amount': pot_amount,
+                    'eligible_players': [p.player_id for p in eligible]
+                })
+            
+            previous_level = level
+        
+        return pots
 
     def post_blinds(self):
         """Post small blind and big blind"""
+        # Initialize total bet tracking
+        self.total_bet_by_player = {p.player_id: 0 for p in self.players}
+        
         small_blind_player = (self.button + 1) % len(self.players)
         big_blind_player = (self.button + 2) % len(self.players)
 
@@ -165,8 +252,9 @@ class PokerGame:
 
         self.current_bet = bb_amount
         
-        print(f"Small blind: Player {small_blind_player} posts ${sb_amount}")
-        print(f"Big blind: Player {big_blind_player} posts ${bb_amount}")
+        if self.DEBUG:
+            print(f"Small blind: Player {small_blind_player} posts ${sb_amount}")
+            print(f"Big blind: Player {big_blind_player} posts ${bb_amount}")
 
     def deal_hole_cards(self):
         """Deal 2 cards to each player"""
@@ -176,18 +264,95 @@ class PokerGame:
             player.receive_cards(cards)
 
     def ai_decision(self, player, community_cards, current_bet, to_call):
-        """Simple AI strategy for betting"""
+        """Make AI decision using poker bots with position and game theory"""
+        
+        # Use enhanced bot if available
+        if self.use_bots and player.player_id in self.bots:
+            return self._bot_decision(player, community_cards, current_bet, to_call)
+        
+        # Fallback to simple AI
+        return self._simple_ai_decision(player, community_cards, current_bet, to_call)
+    
+    def _calculate_position(self, player_idx: int, active_players_count: int) -> str:
+        """
+        Calculate player's position relative to button
+        
+        Args:
+            player_idx: Player's index
+            active_players_count: Number of active (non-folded) players
+        
+        Returns:
+            "early", "middle", or "late"
+        """
+        # Position relative to button
+        pos_from_button = (player_idx - self.button) % len(self.players)
+        
+        if active_players_count <= 3:
+            # Heads-up or 3-way: button is late position
+            return "late" if pos_from_button in [1, 2] else "early"
+        elif active_players_count <= 6:
+            # 4-6 players
+            if pos_from_button in [1, 2]:
+                return "early"
+            elif pos_from_button in [3, 4]:
+                return "middle"
+            else:
+                return "late"
+        else:
+            # 7+ players
+            if pos_from_button in [1, 2, 3]:
+                return "early"
+            elif pos_from_button in [4, 5]:
+                return "middle"
+            else:
+                return "late"
+    
+    def _bot_decision(self, player, community_cards, current_bet, to_call) -> str:
+        """Make decision using poker bot"""
+        bot = self.bots.get(player.player_id)
+        if not bot:
+            return self._simple_ai_decision(player, community_cards, current_bet, to_call)
+        
+        # Calculate position
+        active_players = [p for p in self.players if not p.is_folded]
+        position = self._calculate_position(player.player_id, len(active_players))
+        num_opponents = len(active_players) - 1
+        
+        # Get bot decision
+        try:
+            action, raise_amount = bot.decide_action(
+                hole_cards=player.hole_cards,
+                community_cards=community_cards,
+                current_bet=current_bet,
+                to_call=to_call,
+                player_stack=player.stack,
+                pot=self.pot,
+                position=position,
+                num_opponents=num_opponents,
+                small_blind=self.small_blind,
+                big_blind=self.big_blind
+            )
+            
+            # Convert raise action with amount to "raise" for the betting system
+            if action == "raise" and raise_amount:
+                # Store the raise amount for processing
+                self.pending_raise_amount = raise_amount
+                return "raise"
+            
+            return action
+        except Exception as e:
+            if self.DEBUG:
+                print(f"Bot decision error: {e}, falling back to simple AI")
+            return self._simple_ai_decision(player, community_cards, current_bet, to_call)
+    
+    def _simple_ai_decision(self, player, community_cards, current_bet, to_call) -> str:
+        """Simple AI strategy for betting (fallback)"""
         if to_call > player.stack:
             # All-in or fold
             return "call" if random.random() > 0.7 else "fold"
 
         # Evaluate hand strength
-        if len(community_cards) < 5:
-            # Only evaluate existing cards, don't copy deck
-            best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards)
-        else:
-            best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards)
-
+        best_hand = HandEvaluator.find_best_hand(player.hole_cards, community_cards)
         hand_strength = HandEvaluator.HAND_RANKS[best_hand[0]] if best_hand else 1
 
         # Simple strategy
@@ -202,12 +367,13 @@ class PokerGame:
 
     def betting_round(self, stage):
         """Execute a betting round"""
-        print(f"\n--- {stage.upper()} ---")
-        print(f"Pot: ${self.pot}")
-        if self.community_cards:
+        if self.DEBUG:
+            print(f"\n--- {stage.upper()} ---")
+            print(f"Pot: ${self.pot}")
+        if self.community_cards and self.DEBUG:
             print(f"Community Cards: {self.community_cards}")
 
-        active_players = [p for p in self.players if not p.is_folded and p.stack > 0]
+        active_players = [p for p in self.players if not p.is_folded]
         if len(active_players) <= 1:
             return
 
@@ -223,7 +389,7 @@ class PokerGame:
         while True:
             player = self.players[current_player_idx]
 
-            if player.is_folded or player.stack == 0:
+            if player.is_folded or player.is_all_in:
                 current_player_idx = (current_player_idx + 1) % len(self.players)
                 continue
 
@@ -240,7 +406,9 @@ class PokerGame:
                 print(f"Your cards: {player.hole_cards}")
                 print(f"Your stack: ${player.stack}")
                 print(f"Amount to call: ${to_call}")
-                print(f"Current pot: ${self.pot}")
+                print(f"Current pot: ${self.pot}" )
+                if self.DEBUG:
+                    pass  # Human prompts always show for interaction
                 
                 if to_call == 0:
                     action = input("Your action (check/raise/fold): ").lower().strip()
@@ -249,57 +417,67 @@ class PokerGame:
 
             if action == "fold":
                 player.is_folded = True
-                print(f"Player {player.player_id} folds")
+                if self.DEBUG:
+                    print(f"Player {player.player_id} folds")
             elif action == "call":
                 if to_call > 0:
                     bet_amount = min(to_call, player.stack)
                     player.stack -= bet_amount
                     player.total_bet_this_round += bet_amount
                     self.pot += bet_amount
-                    print(f"Player {player.player_id} calls ${bet_amount}")
+                    if bet_amount == to_call and player.stack == 0:
+                        player.is_all_in = True
+                        if self.DEBUG:
+                            print(f"Player {player.player_id} goes all-in with ${bet_amount}")
+                    elif self.DEBUG:
+                        print(f"Player {player.player_id} calls ${bet_amount}")
                     self.current_bet = max(self.current_bet, player.total_bet_this_round)
             elif action == "raise":
                 if player.is_ai:
-                    raise_amount = min(self.big_blind, player.stack)
+                    # Use pending raise amount from bot if available
+                    raise_amount = getattr(self, 'pending_raise_amount', self.big_blind)
+                    self.pending_raise_amount = 0  # Clear it
                 else:
-                    # Ask human player how much to raise
+                    # Ask human player how much to raise (this should be handled by UI)
                     max_raise = player.stack - to_call
-                    try:
-                        raise_input = input(f"How much to raise? (max ${max_raise}): ").strip()
-                        raise_amount = int(raise_input) if raise_input.isdigit() else self.big_blind
-                        raise_amount = min(raise_amount, max_raise)
-                    except:
-                        raise_amount = min(self.big_blind, max_raise)
+                    raise_amount = min(self.big_blind, max_raise)
                 
                 bet_amount = min(to_call + raise_amount, player.stack)
                 player.stack -= bet_amount
                 player.total_bet_this_round += bet_amount
                 self.pot += bet_amount
                 self.current_bet = player.total_bet_this_round
-                print(f"Player {player.player_id} raises to ${player.total_bet_this_round}")
+                if player.stack == 0:
+                    player.is_all_in = True
+                    if self.DEBUG:
+                        print(f"Player {player.player_id} goes all-in with raise to ${player.total_bet_this_round}")
+                elif self.DEBUG:
+                    print(f"Player {player.player_id} raises to ${player.total_bet_this_round}")
                 players_who_acted_this_level = {player.player_id}  # Reset who has acted
             elif action == "check":
                 if to_call == 0:
-                    print(f"Player {player.player_id} checks")
+                    if self.DEBUG:
+                        print(f"Player {player.player_id} checks")
                 else:
-                    print(f"Player {player.player_id} can't check, must call or fold")
+                    if self.DEBUG:
+                        print(f"Player {player.player_id} can't check, must call or fold")
 
             players_who_acted_this_level.add(player.player_id)
             
             # Check if betting round is complete
-            active_players = [p for p in self.players if not p.is_folded and p.stack > 0]
+            active_players = [p for p in self.players if not p.is_folded]
             if len(active_players) <= 1:
                 break
             
-            # All active players have acted and are at the same bet level
-            active_unfolded = [p for p in self.players if not p.is_folded]
-            if len(active_unfolded) <= 1:
+            # Check if all non-folded, non-all-in players have acted
+            players_still_acting = [p for p in self.players if not p.is_folded and not p.is_all_in]
+            if len(players_still_acting) <= 1:
                 break
                 
-            if all(p.player_id in players_who_acted_this_level for p in active_unfolded):
+            if all(p.player_id in players_who_acted_this_level for p in players_still_acting):
                 all_matched = all(
                     p.total_bet_this_round == self.current_bet 
-                    for p in active_unfolded
+                    for p in players_still_acting
                 )
                 if all_matched:
                     break
@@ -313,66 +491,97 @@ class PokerGame:
         self.current_bet = 0
 
     def determine_winner(self):
-        """Determine winner and return winner info"""
+        """Determine winner with side pots support"""
         active_players = [p for p in self.players if not p.is_folded]
 
         if len(active_players) == 1:
             winner = active_players[0]
-            print(f"\nPlayer {winner.player_id} wins ${self.pot}!")
+            if self.DEBUG:
+                print(f"\nPlayer {winner.player_id} wins ${self.pot}!")
             winner.stack += self.pot
             return {"winners": [winner], "pot": self.pot, "hand_type": "Opponents Folded"}
 
-        # Compare hands
-        best_hand_rank = 0
-        best_tiebreaker = None
-        winners = []
-        winning_hand_type = ""
-
-        for player in active_players:
-            best_hand = HandEvaluator.find_best_hand(player.hole_cards, self.community_cards)
-            hand_type = best_hand[0]
-            hand_rank = HandEvaluator.HAND_RANKS[hand_type]
+        # Create side pots
+        pots = self.create_side_pots()
+        if not pots:
+            # Fallback to single pot
+            pots = [{'amount': self.pot, 'eligible_players': [p.player_id for p in active_players]}]
+        
+        total_distributed = 0
+        
+        # Process each pot
+        for pot_info in pots:
+            pot_amount = pot_info['amount']
+            eligible_ids = pot_info['eligible_players']
+            eligible_players = [p for p in active_players if p.player_id in eligible_ids]
             
-            # Evaluate to get tiebreaker
-            hand_info = HandEvaluator.evaluate_hand(best_hand[1])
-            tiebreaker = hand_info[1]
-
-            print(f"Player {player.player_id}: {player.hole_cards} - {hand_type}")
-
-            if hand_rank > best_hand_rank or (hand_rank == best_hand_rank and tiebreaker > best_tiebreaker):
-                best_hand_rank = hand_rank
-                best_tiebreaker = tiebreaker
-                winners = [player]
-                winning_hand_type = hand_type
-            elif hand_rank == best_hand_rank and tiebreaker == best_tiebreaker:
-                winners.append(player)
-
-        if len(winners) == 1:
-            winner = winners[0]
-            print(f"\nPlayer {winner.player_id} wins ${self.pot}!")
-            winner.stack += self.pot
-            return {"winners": [winner], "pot": self.pot, "hand_type": winning_hand_type}
-        else:
-            # Split pot among winners
-            split_amount = self.pot // len(winners)
-            remainder = self.pot % len(winners)
-            print(f"\nPot split among players: {[w.player_id for w in winners]}")
-            for i, winner in enumerate(winners):
-                amount = split_amount + (1 if i == 0 else 0)  # Give remainder to first winner
-                winner.stack += amount
-                print(f"Player {winner.player_id} gets ${amount}")
-            return {"winners": winners, "pot": self.pot, "hand_type": winning_hand_type}
+            if not eligible_players:
+                continue
+            
+            # Find best hand among eligible players
+            best_hand_rank = 0
+            best_tiebreaker: Optional[Tuple] = None
+            pot_winners = []
+            winning_hand_type = ""
+            
+            for player in eligible_players:
+                best_hand = HandEvaluator.find_best_hand(player.hole_cards, self.community_cards)
+                if best_hand is None:
+                    continue
+                hand_type = best_hand[0]
+                hand_rank = HandEvaluator.HAND_RANKS[hand_type]
+                
+                hand_info = HandEvaluator.evaluate_hand(best_hand[1])
+                tiebreaker = hand_info[1]
+                
+                if self.DEBUG and pot_info == pots[0]:  # Only print hands once
+                    print(f"Player {player.player_id}: {player.hole_cards} - {hand_type}")
+                
+                if best_tiebreaker is None or hand_rank > best_hand_rank or (hand_rank == best_hand_rank and tiebreaker > best_tiebreaker):
+                    best_hand_rank = hand_rank
+                    best_tiebreaker = tiebreaker
+                    pot_winners = [player]
+                    winning_hand_type = hand_type
+                elif hand_rank == best_hand_rank and tiebreaker == best_tiebreaker:
+                    pot_winners.append(player)
+            
+            # Distribute pot among winners
+            if len(pot_winners) == 1:
+                winner = pot_winners[0]
+                winner.stack += pot_amount
+                total_distributed += pot_amount
+                if self.DEBUG and len(pots) > 1:
+                    print(f"Player {winner.player_id} wins side pot of ${pot_amount}")
+            else:
+                split_amount = pot_amount // len(pot_winners)
+                remainder = pot_amount % len(pot_winners)
+                for i, winner in enumerate(pot_winners):
+                    amount = split_amount + (1 if i == 0 else 0)
+                    winner.stack += amount
+                    total_distributed += amount
+                    if self.DEBUG and len(pots) > 1:
+                        print(f"Player {winner.player_id} gets ${amount} from side pot")
+        
+        if self.DEBUG:
+            print(f"\nMain pot distributed: ${total_distributed}")
+        
+        return {"winners": [], "pot": self.pot, "hand_type": "Showdown with side pots"}
 
     def play_hand(self):
         """Play a single hand of poker"""
         self.hand_number += 1
-        print(f"\n{'='*50}")
-        print(f"HAND #{self.hand_number}")
-        print(f"{'='*50}")
+        if self.DEBUG:
+            print(f"\n{'='*50}")
+            print(f"HAND #{self.hand_number}")
+            print(f"{'='*50}")
 
         # Reset player state
         for player in self.players:
             player.reset_for_new_hand()
+        
+        # Reset side pots
+        self.side_pots = []
+        self.total_bet_by_player = {p.player_id: 0 for p in self.players}
 
         # Post blinds and deal
         self.post_blinds()
@@ -380,51 +589,69 @@ class PokerGame:
         self.current_bet = self.big_blind
         self.community_cards = []
 
-        for player in self.players:
-            print(f"Player {player.player_id}: {player.hole_cards}")
+        if self.DEBUG:
+            for player in self.players:
+                print(f"Player {player.player_id}: {player.hole_cards}")
 
         # Pre-flop betting
         self.betting_round("Pre-Flop")
 
-        # Check if only one player remains
+        # Check if only one player remains or if only one player is not all-in
         active_players = [p for p in self.players if not p.is_folded]
-        if len(active_players) == 1:
-            self.determine_winner()
-            self.button = (self.button + 1) % len(self.players)
-            self.pot = 0
-            return
+        players_still_playing = [p for p in active_players if not p.is_all_in]
+        if len(active_players) == 1 or len(players_still_playing) == 0:
+            # If all players are all-in or folded, continue to river and show down
+            if len(active_players) <= 1:
+                self.determine_winner()
+                self.button = (self.button + 1) % len(self.players)
+                self.pot = 0
+                return
+            # Else continue to river with all-in players
 
         # Reset for next round
         self.reset_round_bets()
 
         # Flop
-        self.community_cards = self.deck.deal(3)
+        deck = self._assert_deck()
+        self.community_cards = deck.deal(3)
         self.betting_round("Flop")
 
-        if len([p for p in self.players if not p.is_folded]) == 1:
+        active_players = [p for p in self.players if not p.is_folded]
+        players_still_playing = [p for p in active_players if not p.is_all_in]
+        if len(active_players) == 1:
             self.determine_winner()
             self.button = (self.button + 1) % len(self.players)
             self.pot = 0
             return
+        if len(players_still_playing) == 0:
+            # All remaining players are all-in, continue to river
+            pass
 
         # Reset for next round
         self.reset_round_bets()
 
         # Turn
-        self.community_cards += self.deck.deal(1)
+        deck = self._assert_deck()
+        self.community_cards += deck.deal(1)
         self.betting_round("Turn")
 
-        if len([p for p in self.players if not p.is_folded]) == 1:
+        active_players = [p for p in self.players if not p.is_folded]
+        players_still_playing = [p for p in active_players if not p.is_all_in]
+        if len(active_players) == 1:
             self.determine_winner()
             self.button = (self.button + 1) % len(self.players)
             self.pot = 0
             return
+        if len(players_still_playing) == 0:
+            # All remaining players are all-in, continue to river
+            pass
 
         # Reset for next round
         self.reset_round_bets()
 
         # River
-        self.community_cards += self.deck.deal(1)
+        deck = self._assert_deck()
+        self.community_cards += deck.deal(1)
         self.betting_round("River")
 
         # Showdown
@@ -434,9 +661,10 @@ class PokerGame:
 
     def print_stacks(self):
         """Print current player stacks"""
-        print("\n--- Current Stacks ---")
-        for player in self.players:
-            print(f"Player {player.player_id}: ${player.stack}")
+        if self.DEBUG:
+            print("\n--- Current Stacks ---")
+            for player in self.players:
+                print(f"Player {player.player_id}: ${player.stack}")
 
 
 # Example usage
