@@ -268,6 +268,17 @@ class PokerGame:
         """Get active players excluding the specified player"""
         return [p for p in self.get_active_players() if p != excluding_player]
 
+    def _record_contribution(self, player, amount: int) -> None:
+        """Track what a player has put in across the whole hand.
+
+        total_bet_this_round is cleared between streets, so it cannot be used
+        to work out who is entitled to which pot at showdown.
+        """
+        if amount:
+            self.total_bet_by_player[player.player_id] = (
+                self.total_bet_by_player.get(player.player_id, 0) + amount
+            )
+
     def get_players_still_acting(self) -> List:
         """Players who can still act: neither folded nor already all-in."""
         return [p for p in self.players if not p.is_folded and not p.is_all_in]
@@ -277,35 +288,38 @@ class PokerGame:
         return [p for p in self.get_unfolded_players() if p != excluding_player]
 
     def create_side_pots(self):
-        """Create side pots based on all-in players' contributions"""
-        # Get all non-folded players sorted by their total bet
-        active_players = self.get_unfolded_players()
-        if len(active_players) <= 1:
+        """Split the pot by how much of it each player is entitled to win.
+
+        A player who is all-in for less than the others can only win the part
+        of the pot they matched. Chips from players who folded stay in as dead
+        money and are shared out with the level they were committed at.
+
+        This is built from whole-hand contributions. It used to read
+        total_bet_this_round, which reset_round_bets clears between streets, so
+        at showdown it saw only the river's betting and the rest of the pot was
+        never awarded to anyone.
+        """
+        contenders = self.get_unfolded_players()
+        if len(contenders) <= 1:
             return []
-        
-        # Sort by total bet amount (ascending)
-        bet_levels = sorted(set(p.total_bet_this_round for p in active_players))
-        
+
+        contributions = dict(self.total_bet_by_player)
+        levels = sorted({contributions.get(p.player_id, 0) for p in contenders})
+
         pots = []
-        previous_level = 0
-        
-        for level in bet_levels:
-            # Create pot for this level
-            eligible = [p for p in active_players if p.total_bet_this_round >= level]
-            
-            if not eligible:
+        previous = 0
+        for level in levels:
+            if level <= previous:
                 continue
-                
-            pot_amount = (level - previous_level) * len(eligible)
-            
-            if pot_amount > 0:
-                pots.append({
-                    'amount': pot_amount,
-                    'eligible_players': [p.player_id for p in eligible]
-                })
-            
-            previous_level = level
-        
+            # Everyone contributes to this layer up to their own commitment.
+            amount = sum(min(c, level) - min(c, previous)
+                         for c in contributions.values())
+            eligible = [p.player_id for p in contenders
+                        if contributions.get(p.player_id, 0) >= level]
+            if amount > 0 and eligible:
+                pots.append({"amount": amount, "eligible_players": eligible})
+            previous = level
+
         return pots
 
     def post_blinds(self):
@@ -321,12 +335,14 @@ class PokerGame:
         self.players[small_blind_player].stack -= sb_amount
         self.players[small_blind_player].total_bet_this_round = sb_amount
         self.pot += sb_amount
+        self._record_contribution(self.players[small_blind_player], sb_amount)
         
         # Big blind
         bb_amount = min(self.big_blind, self.players[big_blind_player].stack)
         self.players[big_blind_player].stack -= bb_amount
         self.players[big_blind_player].total_bet_this_round = bb_amount
         self.pot += bb_amount
+        self._record_contribution(self.players[big_blind_player], bb_amount)
 
         self.current_bet = bb_amount
         
@@ -456,9 +472,6 @@ class PokerGame:
         if not self.observer.before_ai_action(self, player, to_call, stage):
             return (None, None)
 
-        if to_call == 0:
-            return ("check", None)
-
         # ai_decision reports a raise size out of band via pending_raise_amount.
         self.pending_raise_amount = 0
         action = self.ai_decision(player, self.community_cards, self.current_bet, to_call)
@@ -486,6 +499,7 @@ class PokerGame:
         player.stack -= amount
         player.total_bet_this_round += amount
         self.pot += amount
+        self._record_contribution(player, amount)
 
         raise_size = player.total_bet_this_round - self.current_bet
         if raise_size >= self.last_raise_size:
@@ -509,11 +523,18 @@ class PokerGame:
             action_taken = True
 
         elif action == "call":
-            if to_call > 0:
+            if to_call == 0:
+                # Calling nothing is a check. Without this the action counts as
+                # not taken, the player is never recorded as having acted, and
+                # the round spins until the iteration guard trips.
+                action = "check"
+                action_taken = True
+            else:
                 amount = min(to_call, player.stack)
                 player.stack -= amount
                 player.total_bet_this_round += amount
                 self.pot += amount
+                self._record_contribution(player, amount)
                 action_taken = True
                 self.current_bet = max(self.current_bet, player.total_bet_this_round)
 
@@ -532,6 +553,7 @@ class PokerGame:
                     player.stack -= amount
                     player.total_bet_this_round += amount
                     self.pot += amount
+                    self._record_contribution(player, amount)
                     action_taken = True
                 self.current_bet = max(self.current_bet, player.total_bet_this_round)
 
@@ -672,6 +694,12 @@ class PokerGame:
             pots = [{'amount': self.pot, 'eligible_players': [p.player_id for p in active_players]}]
         
         total_distributed = 0
+        # Winners accumulate across side pots so the caller learns who won.
+        # This used to return an empty list for every showdown, which left the
+        # GUI unable to name a winner and the hand log recording nobody as
+        # having won a showdown.
+        showdown_winners = []
+        main_pot_hand_type = None
         
         # Process each pot
         for pot_info in pots:
@@ -710,6 +738,12 @@ class PokerGame:
                     pot_winners.append(player)
             
             # Distribute pot among winners
+            if main_pot_hand_type is None:
+                main_pot_hand_type = winning_hand_type
+            for winner in pot_winners:
+                if winner not in showdown_winners:
+                    showdown_winners.append(winner)
+
             if len(pot_winners) == 1:
                 winner = pot_winners[0]
                 winner.stack += pot_amount
@@ -732,7 +766,11 @@ class PokerGame:
         if self.DEBUG:
             print(f"\nMain pot distributed: ${total_distributed}")
         
-        return {"winners": [], "pot": self.pot, "hand_type": "Showdown with side pots"}
+        return {
+            "winners": showdown_winners,
+            "pot": total_distributed,
+            "hand_type": main_pot_hand_type or "Showdown",
+        }
 
     # (street name, cards dealt before that street's betting)
     STREETS = (("Pre-Flop", 0), ("Flop", 3), ("Turn", 1), ("River", 1))

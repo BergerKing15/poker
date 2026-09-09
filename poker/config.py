@@ -39,6 +39,10 @@ CARD_IMAGE_FORMAT = ".png"
 CARDS_DIRECTORY = "cards-png-100px"
 CARDS_DIR = ASSETS_DIR / CARDS_DIRECTORY
 
+# Pre-computed pre-flop equity, built by tools/build_equity_table.py.
+DATA_DIR = PACKAGE_ROOT / "data"
+PREFLOP_TABLE_PATH = DATA_DIR / "preflop_equity.json"
+
 # Debug/Logging
 ENABLE_DEBUG = False  # Set to True for verbose output
 ENABLE_PERFORMANCE_LOGGING = False  # Log performance metrics

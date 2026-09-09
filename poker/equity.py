@@ -15,6 +15,28 @@ class WinProbabilityCalculator:
         """
         self.num_simulations = num_simulations
     
+    @staticmethod
+    def _validate(player_hole_cards, community_cards, num_opponents) -> None:
+        """Reject impossible situations.
+
+        Separate from the sampling so a caching subclass can validate a request
+        before answering it from a table - a cache must never turn a bad
+        request into a plausible-looking number.
+        """
+        if len(player_hole_cards) != 2:
+            raise ValueError("Player must have exactly 2 hole cards")
+
+        if len(community_cards) not in [0, 3, 4, 5]:
+            raise ValueError("Community cards must be 0, 3, 4, or 5 cards")
+
+        if num_opponents < 1:
+            raise ValueError("Must have at least 1 opponent")
+
+        hole = set(str(c) for c in player_hole_cards)
+        board = set(str(c) for c in community_cards)
+        if len(hole) != 2 or hole & board:
+            raise ValueError("Player cards and community cards have duplicates")
+
     def calculate_win_probability(
         self,
         player_hole_cards: List[Card],
@@ -36,20 +58,7 @@ class WinProbabilityCalculator:
             - 'lose_prob': Probability of losing
             - 'equity': Win probability + (tie probability / num_players)
         """
-        if len(player_hole_cards) != 2:
-            raise ValueError("Player must have exactly 2 hole cards")
-        
-        if len(community_cards) not in [0, 3, 4, 5]:
-            raise ValueError("Community cards must be 0, 3, 4, or 5 cards")
-        
-        if num_opponents < 1:
-            raise ValueError("Must have at least 1 opponent")
-        
-        # Validate no duplicate cards
-        all_player_cards = set(str(c) for c in player_hole_cards)
-        all_community_cards = set(str(c) for c in community_cards)
-        if all_player_cards & all_community_cards:
-            raise ValueError("Player cards and community cards have duplicates")
+        self._validate(player_hole_cards, community_cards, num_opponents)
         
         # Run simulations
         wins = 0

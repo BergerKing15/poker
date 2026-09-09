@@ -5,7 +5,7 @@ Enhanced AI player for Texas Hold'em using game theory and win probability
 import random
 from typing import List, Tuple, Optional
 from poker.game import Card, HandEvaluator
-from poker.equity import WinProbabilityCalculator
+from poker.equity_cache import CachedEquityCalculator
 
 
 class PokerBotType:
@@ -37,14 +37,21 @@ class PokerBot:
         "FISH": PokerBotType("FISH (Loose-Passive)", 0.30, 0.20),       # Weak player
     }
     
-    # Shared win probability calculator (1 per process, not per bot)
+    # Shared, cached equity calculator (1 per process, not per bot)
     _shared_win_prob_calc = None
     
     @classmethod
     def get_shared_calculator(cls, num_simulations=200):
-        """Get or create shared WinProbabilityCalculator"""
+        """Get or create the shared equity calculator.
+
+        Cached: pre-flop answers come from a pre-computed table and post-flop
+        ones are memoised, so repeated spots cost nothing. The sample size only
+        applies to situations the caches miss.
+        """
         if cls._shared_win_prob_calc is None:
-            cls._shared_win_prob_calc = WinProbabilityCalculator(num_simulations=num_simulations)
+            cls._shared_win_prob_calc = CachedEquityCalculator(
+                num_simulations=num_simulations
+            )
         return cls._shared_win_prob_calc
     
     def __init__(self, player_id: int, bot_type: Optional[str] = None):
@@ -403,12 +410,9 @@ if __name__ == "__main__":
 # SIMPLE STRATEGY BOTS FOR BASELINE COMPARISON AND ML TRAINING
 # ============================================================================
 
-# Card.RANKS spells ten as "10", but hand keys use the standard one-character
-# poker notation ("AT", "T9o"), so ten is folded to "T" when building a key.
-RANK_VALUES = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
-               '10': 10, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
-
-HAND_KEY_RANKS = {'10': 'T'}
+# Starting-hand notation lives in poker.notation so poker.equity_cache can use
+# it too. Re-exported here because bots and their tests refer to poker.bot.
+from poker.notation import RANK_VALUES, hand_key  # noqa: E402  (kept for callers)
 
 
 def raise_to_total(current_bet: int, to_call: int, player_stack: int,
@@ -416,27 +420,11 @@ def raise_to_total(current_bet: int, to_call: int, player_stack: int,
     """Total to raise the round bet TO: `extra` chips above the current bet.
 
     Bots reason in "how much more than the current bet"; the engine wants a
-    total. The result is capped at everything this player has, so passing a
-    huge `extra` is how a bot shoves.
+    total. Capped at everything this player has, so passing a huge `extra` is
+    how a bot shoves.
     """
     already_in = current_bet - to_call
     return min(current_bet + max(extra, 1), already_in + player_stack)
-
-
-def hand_key(hole_cards, include_suitedness: bool = False) -> str:
-    """Canonical starting-hand notation, high card first (e.g. "AK", "JJ", "T9o")."""
-    r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-    v1, v2 = RANK_VALUES[r1], RANK_VALUES[r2]
-    k1, k2 = HAND_KEY_RANKS.get(r1, r1), HAND_KEY_RANKS.get(r2, r2)
-
-    if v1 == v2:
-        return f"{k1}{k2}"
-
-    high, low = (k1, k2) if v1 > v2 else (k2, k1)
-    if include_suitedness:
-        suited = "s" if hole_cards[0].suit == hole_cards[1].suit else "o"
-        return f"{high}{low}{suited}"
-    return f"{high}{low}"
 
 
 class SimpleBotTop10Percent:

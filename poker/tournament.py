@@ -13,6 +13,7 @@ from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Any
 from poker.game import PokerGame, Player
+from poker.hand_log import HandLog
 from poker.bot import (
     PokerBot, SimpleBotTop10Percent, SimpleBotAlwaysAllIn,
     SimpleBotCheckCall, SimpleBotRandom, SimpleBotNeverFold,
@@ -112,7 +113,8 @@ class BotTournament:
     def __init__(self):
         self.stats: Dict[str, Dict[str, Any]] = {}
     
-    def run_tournament(self, config_list, hands_per_game=100, verbose=True, fast_mode=False, update_interval=5):
+    def run_tournament(self, config_list, hands_per_game=100, verbose=True,
+                       fast_mode=False, update_interval=5, hand_log_path=None):
         """
         Run tournament with specified bot configurations
         
@@ -123,7 +125,10 @@ class BotTournament:
             verbose: Print progress
             fast_mode: Use only simple bots (no AI calculations, much faster for testing)
             update_interval: Progress update interval in seconds (default: 5)
+            hand_log_path: If given, record every hand to this SQLite file for
+                later analysis. Runs accumulate rather than overwriting.
         """
+        self.hand_log = HandLog(hand_log_path, label="tournament") if hand_log_path else None
         # Fast mode: only allow simple bot types
         SIMPLE_BOTS = {"Random", "CheckCall", "AllIn", "NeverFold", "AlwaysRaise", "Bottom50%", "NeverBet", "Limper", "Folder"}
         if fast_mode:
@@ -226,13 +231,20 @@ class BotTournament:
     def _run_single_game(self, num_players, bot_types, hands_to_play, initial_stacks):
         """Run a single multi-hand game"""
         # Create game
+        hand_log = getattr(self, "hand_log", None)
         game = PokerGame(
             num_players=num_players,
             starting_stack=1000,
             small_blind=5,
             big_blind=10,
-            use_bots=True  # Enable bots so AI decisions are used
+            use_bots=True,  # Enable bots so AI decisions are used
+            observer=hand_log,  # None keeps the default no-op observer
         )
+        if hand_log is not None:
+            # Label seats by configured type, not by the bot's own name, so the
+            # log groups the same way the summary does.
+            hand_log.bot_types = {i: bot_types[i % len(bot_types)]
+                                  for i in range(num_players)}
         
         # Replace players with bots
         game.bots = {}
