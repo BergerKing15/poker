@@ -3,6 +3,8 @@
 Verification script for Poker Bot AI installation
 """
 
+from console import enable_utf8_output
+
 import sys
 
 def check_imports():
@@ -133,6 +135,7 @@ def check_files():
         return False
 
 if __name__ == "__main__":
+    enable_utf8_output()
     print("=" * 60)
     print("POKER BOT AI - INSTALLATION VERIFICATION")
     print("=" * 60)

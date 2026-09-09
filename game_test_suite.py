@@ -119,10 +119,28 @@ class MockPokerGame(PokerGame):
 
 class GameTester:
     """Test utilities for poker game logic"""
-    
+
+    # Every tester registers itself here. The test functions create a tester,
+    # print its summary and drop it, so a runner has no other way to find out
+    # whether an assertion failed anywhere (the assert_* helpers record
+    # failures rather than raising).
+    _instances: List["GameTester"] = []
+
+    @classmethod
+    def reset_totals(cls):
+        """Forget previously registered testers."""
+        cls._instances.clear()
+
+    @classmethod
+    def totals(cls):
+        """Return (passed, failed) summed over every tester created so far."""
+        return (sum(t.assertions_passed for t in cls._instances),
+                sum(t.assertions_failed for t in cls._instances))
+
     def __init__(self):
         self.assertions_passed = 0
         self.assertions_failed = 0
+        GameTester._instances.append(self)
         self.test_results = []
     
     def parse_card_string(self, card_str: str) -> Card:

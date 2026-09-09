@@ -4,6 +4,8 @@ Diagnostic tool to find which hand causes the tournament to hang.
 Runs games with detailed per-hand timing and logs.
 """
 
+from console import enable_utf8_output
+
 import sys
 import time
 import signal
@@ -112,4 +114,5 @@ def main():
     print("\n" + "="*70)
 
 if __name__ == "__main__":
+    enable_utf8_output()
     main()

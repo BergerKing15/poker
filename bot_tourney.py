@@ -4,6 +4,8 @@ Bot Tournament Runner - Runs thousands of hands to compare bot strategies
 Generates ML training data and performance statistics
 """
 
+from console import enable_utf8_output
+
 import json
 import time
 import threading
@@ -528,6 +530,7 @@ def main_with_ui():
 
 
 if __name__ == "__main__":
+    enable_utf8_output()
     import sys
     
     # Check for UI flag

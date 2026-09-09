@@ -13,16 +13,16 @@ python bot_tourney.py         # full headless bot tournament -> tournament_resul
 python bot_tourney.py --fast  # same, but every AI bot is swapped for "Random" (seconds, not minutes)
 python bot_tourney.py --ui    # tournament with the analytics dashboard
 python verify_installation.py # smoke check: imports, bot types, game creation
-python all_tests.py           # all 3 suites (~0.05s)
+python all_tests.py           # all 3 suites, 135 assertions (~75-140s)
 ```
 
 Individual suites: `game_test_suite.py`, `win_probability_test_suite.py`, `test_bot_ai.py`,
 `test_all_bots.py` (bot registry), `test_tourney_quick.py` (short tournament).
 
-**On Windows, prefix test/tournament commands with `PYTHONIOENCODING=utf-8`.** Every script
-prints `✓`/`❌`/emoji, and the default cp1252 console encoding makes them die with
-`UnicodeEncodeError` before any test result is reported — the failure looks like a test
-failure but isn't.
+Every entry point calls `console.enable_utf8_output()` before printing, which is what
+keeps the `✓`/`❌`/emoji output from dying with `UnicodeEncodeError` on a cp1252 Windows
+console. Call it first in any new script that prints non-ASCII; without it the traceback
+lands mid-run and looks like a test failure.
 
 ## Architecture
 
@@ -98,9 +98,12 @@ to see the swallowed error, or call `decide_action` directly.
   `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
   `test_bot_ai.test_hand_range_notation` enforces this across every range constant it can
   find, so a low-card-first typo now fails the suite instead of quietly shrinking a range.
-- `all_tests.py` "runs" suites by *importing* them (the tests execute at module import).
-  A suite that is already imported in the same process is a no-op, and a suite that
-  passes without asserting anything still reports PASSED.
+- `all_tests.py` imports each suite and calls its `test_*` functions directly, because
+  the suites invoke their tests from a `__main__` block — plain `import` runs nothing.
+  Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so its
+  assertions register against a different `GameTester` class and the tally reads zero.
+  Failures are counted, not raised (`assert_*` records and returns), so the runner reads
+  `GameTester.totals()` and exits 2 if no assertion ran at all.
 - `__pycache__/*.pyc` are committed to the repo despite `.gitignore` listing
   `__pycache__/` — gitignore does not apply to already-tracked files, so they show up as
   modified on every run. `git rm -r --cached __pycache__` clears it.
@@ -111,16 +114,11 @@ Agreed but not finished, roughly in the order it should be tackled. The refactor
 listed before the data work on purpose — building a data layer on top of the duplicated
 betting loop means migrating it twice.
 
-**1. UTF-8 console output.** Entry-point scripts print `✓`/emoji, which raises
-`UnicodeEncodeError` on a cp1252 Windows console before any result is shown. Fix at the
-source (e.g. a shared `enable_utf8_output()` calling `sys.stdout.reconfigure`) so the
-`PYTHONIOENCODING=utf-8` workaround in **Commands** stops being necessary.
-
-**2. CI workflow.** Correct the dead constructor signatures listed under **Known traps**,
+**1. CI workflow.** Correct the dead constructor signatures listed under **Known traps**,
 fix `Card('Spades', 'T')` in the performance step (invalid rank — must be `'10'`), and
 drop the `|| echo "✓ … completed"` guards that turn failures green.
 
-**3. Unify the two betting loops.** The duplication described under **Architecture** is
+**2. Unify the two betting loops.** The duplication described under **Architecture** is
 the main structural debt. Plan: make `PokerGame.betting_round`/`play_hand` the single
 implementation, parameterised by hooks a front-end supplies — an action provider for
 human turns, plus event callbacks for logging/display/delay — then delete
@@ -130,7 +128,7 @@ Watch for behaviour the GUI copy currently gets wrong: it never sets `is_all_in`
 on `stack == 0` instead, has no max-iteration guard, and doesn't force a call when a
 player checks facing a bet.
 
-**4. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
+**3. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
 200-hand Monte Carlo: **~78 ms per call**, which is why an exhaustive sweep over the 5 AI
 bots takes ~26 minutes while the 12 simple bots finish in under a second. Preflop is only
 169 canonical hands × 1-9 opponents = **1,521 rows** - precompute once, ship as JSON, load
@@ -139,21 +137,25 @@ at import. Postflop can't be enumerated (~29M flop combinations), so memoise at 
 per situation where they currently jitter, so cached results aren't directly comparable
 to existing tournament numbers.
 
-**5. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
+**4. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
 data" but `save_results` writes only aggregates — win rate, total gain, final stacks — and
 overwrites the same file every run (the committed `tournament_results.json` is a single
 50-hand game). Per-hand rows (hand id, bot type, position, hole cards, board, action
 sequence, pot, net result) are tabular, append-only and query-shaped; `sqlite3` is stdlib,
 so no new dependency. This is for accumulating and querying history across runs — it does
-**not** avoid re-running simulations, which is what item 4 is for.
+**not** avoid re-running simulations, which is what item 3 is for.
 
 
 ## Conventions
 
 - No test framework — suites are plain scripts using `GameTester`'s `assert_*` helpers
   (`game_test_suite.py`), which tally results and print a summary. Add cases as
-  `test_*()` functions and call them from that file's `__main__` block; nothing
-  auto-discovers them.
+  `test_*()` functions and call them from that file's `__main__` block; `all_tests.py`
+  picks them up by name. Every tester registers itself on `GameTester._instances`, so
+  `GameTester.totals()` sees assertions from any suite.
+- Equity assertions are Monte Carlo, so bound them on the measured value with room for
+  noise (~0.007 std error at 5,000 simulations); a range hugging the true value within
+  ~3σ will flake.
 - To test engine behaviour deterministically, use `GameScript` + `MockPokerGame` from
   `game_test_suite.py`: they let you pin hole cards, community cards, and a per-street
   action sequence. `GameTester.parse_hand("AS KS")` builds cards from strings.

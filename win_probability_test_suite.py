@@ -82,13 +82,15 @@ def test_premium_preflop_hands():
     # Test AK (strong hand)
     ak = tester.parse_hand("AS KH")
     result = tester.calculator.calculate_win_probability(ak, [], num_opponents=2)
-    tester.assert_equity_range(result['equity'], 0.50, 0.70, "AK equity vs 2 opponents")
+    # AKo vs 2 random hands is ~0.488 (the old 0.50 floor was simply wrong).
+    tester.assert_equity_range(result['equity'], 0.43, 0.55, "AK equity vs 2 opponents")
     tester.assert_hand_strength(ak, [], 2, "good", "AK pre-flop")
     
     # Test AQ
     aq = tester.parse_hand("AS QD")
     result = tester.calculator.calculate_win_probability(aq, [], num_opponents=2)
-    tester.assert_equity_range(result['equity'], 0.45, 0.65, "AQ equity vs 2 opponents")
+    # AQo vs 2 random hands is ~0.478.
+    tester.assert_equity_range(result['equity'], 0.42, 0.54, "AQ equity vs 2 opponents")
     
     # Test 99 (medium pair)
     nines = tester.parse_hand("9S 9D")
@@ -112,7 +114,8 @@ def test_weak_preflop_hands():
     # Test 72o (worst hand)
     weak = tester.parse_hand("7S 2D")
     result = tester.calculator.calculate_win_probability(weak, [], num_opponents=2)
-    tester.assert_equity_range(result['equity'], 0.20, 0.40, "72o equity vs 2 opponents")
+    # 72o vs 2 random hands is ~0.222.
+    tester.assert_equity_range(result['equity'], 0.16, 0.29, "72o equity vs 2 opponents")
     tester.assert_hand_strength(weak, [], 2, "weak", "72o pre-flop")
     
     # Test 92o

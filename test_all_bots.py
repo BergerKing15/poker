@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Test that all bot types load correctly"""
 
+from console import enable_utf8_output
+
+enable_utf8_output()
+
 from bot_tourney import BotTournament
 
 t = BotTournament()
