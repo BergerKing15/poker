@@ -218,6 +218,8 @@ class PokerGame:
         self.side_pots: List = []  # List of {amount, eligible_players}
         self.total_bet_by_player = {}  # Track total bet amount per player for side pot calculation
         self.pending_raise_amount = 0  # Temporary storage for bot raise amounts
+        # Size of the last bet or raise this round; sets the minimum re-raise.
+        self.last_raise_size = big_blind
         # Front-end hooks; ConsoleObserver keeps the terminal demo working.
         self.observer = observer if observer is not None else ConsoleObserver()
         
@@ -444,8 +446,9 @@ class PokerGame:
     def _request_action(self, player, to_call, stage):
         """Ask whoever controls this seat what to do.
 
-        Returns (action, raise_amount). A None action means the observer wants
-        this player passed over for now (the UI's "skip to my turn" button).
+        Returns (action, raise_to). A None action means the observer wants this
+        player passed over for now (the UI's "skip to my turn" button). A raise
+        carries the total to raise the round bet TO, not an increment.
         """
         if not player.is_ai:
             return self.observer.get_human_action(self, player, to_call, stage)
@@ -462,6 +465,34 @@ class PokerGame:
         raise_amount = self.pending_raise_amount or None
         self.pending_raise_amount = 0
         return (action, raise_amount)
+
+    def _apply_raise(self, player, raise_to):
+        """Raise this player's round bet TO `raise_to`, and return chips spent.
+
+        `raise_to` is a total for the round, not an increment - the same thing
+        the log means by "raises to $60". It is clamped to the legal minimum
+        and to everything the player has, so a caller can pass a huge number to
+        mean all-in.
+        """
+        max_raise_to = player.total_bet_this_round + player.stack
+        # A player too short to make the minimum can still shove for less.
+        minimum = min(self.minimum_raise_to(), max_raise_to)
+
+        if not raise_to:
+            raise_to = self.minimum_raise_to()
+        raise_to = min(max(raise_to, minimum), max_raise_to)
+
+        amount = raise_to - player.total_bet_this_round
+        player.stack -= amount
+        player.total_bet_this_round += amount
+        self.pot += amount
+
+        raise_size = player.total_bet_this_round - self.current_bet
+        if raise_size >= self.last_raise_size:
+            # A short all-in does not reopen the betting for players behind.
+            self.last_raise_size = raise_size
+        self.current_bet = max(self.current_bet, player.total_bet_this_round)
+        return amount
 
     def _apply_action(self, player, action, raise_amount, to_call, stage):
         """Move the money for one action and tell the observer what happened.
@@ -487,12 +518,7 @@ class PokerGame:
                 self.current_bet = max(self.current_bet, player.total_bet_this_round)
 
         elif action == "raise":
-            increment = raise_amount if raise_amount else self.big_blind
-            amount = min(to_call + increment, player.stack)
-            player.stack -= amount
-            player.total_bet_this_round += amount
-            self.pot += amount
-            self.current_bet = player.total_bet_this_round
+            amount = self._apply_raise(player, raise_amount)
             action_taken = True
 
         elif action == "check":
@@ -617,6 +643,16 @@ class PokerGame:
         for player in self.players:
             player.total_bet_this_round = 0
         self.current_bet = 0
+        self.last_raise_size = self.big_blind
+
+    def minimum_raise_to(self) -> int:
+        """Smallest total a raise may bring a player's round bet to.
+
+        Standard no-limit rule: a raise must be at least the size of the
+        previous bet or raise in this round, and never less than the big blind.
+        A player who cannot afford that may still move all-in for less.
+        """
+        return self.current_bet + max(self.last_raise_size, self.big_blind)
 
     def determine_winner(self):
         """Determine winner with side pots support"""
@@ -724,6 +760,7 @@ class PokerGame:
 
         self.deal_hole_cards()
         self.current_bet = self.big_blind
+        self.last_raise_size = self.big_blind
         self.community_cards = []
 
         if self.DEBUG:

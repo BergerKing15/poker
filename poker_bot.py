@@ -270,10 +270,10 @@ class PokerBot:
             # Consider raising - aggressive players raise more often
             raise_probability = self.type.aggression * (0.4 + looseness * 0.4)
             if random.random() < raise_probability and hand_strength > (0.3 - looseness * 0.1):
-                raise_amount = self._calculate_raise_amount(
-                    to_call, player_stack, pot_odds, hand_strength
+                raise_to = self._calculate_raise_amount(
+                    to_call, player_stack, hand_strength, current_bet
                 )
-                return ("raise", raise_amount)
+                return ("raise", raise_to)
             else:
                 return ("call", None)
         else:
@@ -299,7 +299,7 @@ class PokerBot:
             if random.random() < self.type.aggression:
                 # Bet
                 bet_size = int(player_stack * (0.20 + self.type.aggression * 0.15))
-                return ("raise", bet_size)
+                return ("raise", raise_to_total(current_bet, 0, player_stack, bet_size))
         
         # Check with weaker hands
         return ("check", None)
@@ -308,28 +308,23 @@ class PokerBot:
         self,
         to_call: int,
         player_stack: int,
-        pot_odds: float,
-        hand_strength: float
+        hand_strength: float,
+        current_bet: int
     ) -> int:
-        """Calculate raise amount based on hand strength"""
-        
-        # Tighter players and more aggressive players raise more
-        aggression_factor = self.type.aggression
-        
-        # Stronger hands = larger raises
-        strength_factor = hand_strength
-        
-        # Base raise: call amount + small aggression raise
-        min_raise = to_call
-        
-        # Max raise: all-in or reasonable aggressive raise
-        max_raise = int(player_stack * 0.5)
-        
-        # Calculate raise amount
-        raise_amount = int(min_raise + (max_raise - min_raise) * aggression_factor * strength_factor)
-        raise_amount = max(min_raise, min(raise_amount, player_stack))
-        
-        return raise_amount
+        """Total to raise the round bet TO, sized by aggression and hand strength.
+
+        This used to return chips-to-commit while the engine treated the number
+        as an increment on top of the call, so every bot raise was inflated by
+        the call amount.
+        """
+        # Stronger hands and more aggressive styles raise larger.
+        weight = self.type.aggression * hand_strength
+
+        smallest_bet = max(int(player_stack * 0.05), 1)
+        largest_bet = max(int(player_stack * 0.5), smallest_bet)
+        extra = int(smallest_bet + (largest_bet - smallest_bet) * weight)
+
+        return raise_to_total(current_bet, to_call, player_stack, extra)
     
     def _decide_with_limited_equity(
         self,
@@ -416,6 +411,18 @@ RANK_VALUES = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
 HAND_KEY_RANKS = {'10': 'T'}
 
 
+def raise_to_total(current_bet: int, to_call: int, player_stack: int,
+                   extra: int) -> int:
+    """Total to raise the round bet TO: `extra` chips above the current bet.
+
+    Bots reason in "how much more than the current bet"; the engine wants a
+    total. The result is capped at everything this player has, so passing a
+    huge `extra` is how a bot shoves.
+    """
+    already_in = current_bet - to_call
+    return min(current_bet + max(extra, 1), already_in + player_stack)
+
+
 def hand_key(hole_cards, include_suitedness: bool = False) -> str:
     """Canonical starting-hand notation, high card first (e.g. "AK", "JJ", "T9o")."""
     r1, r2 = hole_cards[0].rank, hole_cards[1].rank
@@ -478,7 +485,8 @@ class SimpleBotAlwaysAllIn:
                       player_stack, pot, position, num_opponents,
                       small_blind, big_blind):
         """Always go all-in"""
-        return ("raise", max(player_stack, to_call))
+        # Asking for more than the stack; the engine clamps it to all-in.
+        return ("raise", raise_to_total(current_bet, to_call, player_stack, player_stack))
 
 
 class SimpleBotCheckCall:
@@ -514,14 +522,16 @@ class SimpleBotNeverFold:
         if to_call == 0:
             # Check or bet
             if random.random() < 0.3:  # 30% chance to raise
-                return ("raise", int(player_stack * 0.1))
+                return ("raise", raise_to_total(current_bet, to_call, player_stack,
+                                                int(player_stack * 0.1)))
             return ("check", None)
         elif to_call > player_stack:
             return ("call", None)  # All-in
         else:
             # Occasionally raise instead of call
             if random.random() < 0.2:
-                return ("raise", to_call * 2)
+                return ("raise", raise_to_total(current_bet, to_call, player_stack,
+                                                to_call * 2))
             return ("call", None)
 
 
@@ -538,11 +548,13 @@ class SimpleBotAlwaysRaise:
         """Always raise pre-flop, call post-flop"""
         if len(community_cards) == 0:  # Pre-flop
             if to_call == 0:
-                return ("raise", int(big_blind * 2))
+                return ("raise", raise_to_total(current_bet, to_call, player_stack,
+                                                big_blind * 2))
             elif to_call > player_stack:
                 return ("call", None)  # All-in
             else:
-                return ("raise", max(to_call * 2, int(big_blind * 3)))
+                return ("raise", raise_to_total(current_bet, to_call, player_stack,
+                                                max(to_call * 2, big_blind * 3)))
         else:  # Post-flop
             if to_call == 0:
                 return ("check", None)
@@ -786,9 +798,8 @@ class SimpleBotRandom:
                 return ("call", None)
         else:  # raise
             if to_call == 0:
-                raise_amount = random.randint(1, int(player_stack * 0.5))
-                return ("raise", raise_amount)
+                extra = random.randint(1, max(int(player_stack * 0.5), 1))
             else:
-                raise_amount = min(random.randint(to_call, int(player_stack * 0.7)), player_stack)
-                return ("raise", raise_amount)
+                extra = random.randint(to_call, max(int(player_stack * 0.7), to_call + 1))
+            return ("raise", raise_to_total(current_bet, to_call, player_stack, extra))
 

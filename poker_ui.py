@@ -588,15 +588,16 @@ class PokerUI(GameObserver):
             messagebox.showerror("Error", "Invalid raise amount")
     
     def setup_raise_controls(self, to_call, stack):
-        """Setup raise slider based on to_call and stack"""
+        """Set the slider to a "raise to" total, which is what the engine wants.
+
+        The number shown is the total this player's bet is raised to, so it
+        matches the "raises to $X" line in the history instead of being an
+        increment added on top of the call.
+        """
         game = self._assert_game()
-        # Calculate min and max raise
-        if game.current_bet == 0:
-            min_raise = game.big_blind
-        else:
-            min_raise = game.current_bet
-        
-        max_raise = stack  # All-in
+        already_in = game.current_bet - to_call
+        max_raise = already_in + stack  # all-in
+        min_raise = min(game.minimum_raise_to(), max_raise)
         
         self.raise_slider.config(from_=min_raise, to=max_raise)
         self.raise_var.set(min_raise)

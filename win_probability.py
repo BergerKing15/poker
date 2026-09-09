@@ -216,17 +216,25 @@ class WinProbabilityCalculator:
         
         equity = result['equity']
         num_players = num_opponents + 1
-        
-        # Categorize based on equity
-        if equity < 1 / (num_players * 2):
+
+        # Bands are a fraction of the headroom between a random hand's equity
+        # (1 / num_players) and certainty. Fixed offsets do not work across
+        # table sizes: with +0.35 for the top band, "excellent" started at 0.85
+        # heads-up - barely above AA's 0.854, so the best starting hand in
+        # poker landed in the top category only by Monte Carlo luck - and was
+        # unreachable at all pre-flop with five or more players.
+        baseline = 1 / num_players
+        headroom = 1.0 - baseline
+
+        if equity < baseline * 0.5:
             return "very weak"
-        elif equity < 1 / num_players:
+        elif equity < baseline:
             return "weak"
-        elif equity < 1 / num_players + 0.1:
+        elif equity < baseline + 0.15 * headroom:
             return "fair"
-        elif equity < 1 / num_players + 0.2:
+        elif equity < baseline + 0.35 * headroom:
             return "good"
-        elif equity < 1 / num_players + 0.35:
+        elif equity < baseline + 0.60 * headroom:
             return "very good"
         else:
             return "excellent"

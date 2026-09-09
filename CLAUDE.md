@@ -108,12 +108,14 @@ to see the swallowed error, or call `decide_action` directly.
   `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
   `test_bot_ai.test_hand_range_notation` enforces this across every range constant it can
   find, so a low-card-first typo now fails the suite instead of quietly shrinking a range.
-- The raise amount an observer returns is an **increment on top of the call**, not a
-  "raise to" total: the engine spends `min(to_call + raise_amount, stack)`. The UI's raise
-  slider is populated with absolute-looking values (`current_bet` up to the stack) and
-  then passed through as that increment, so the minimum slider position raises by roughly
-  the current bet. Pre-existing behaviour, preserved through the refactor — fix the slider
-  or the semantics deliberately, not by accident.
+- A raise is expressed as a **total to raise the round bet TO**, never an increment —
+  the same thing the log means by "raises to $60". `PokerGame._apply_raise` clamps it to
+  `minimum_raise_to()` and to the player's stack, so passing a huge number means all-in.
+  Bots build totals with `poker_bot.raise_to_total(current_bet, to_call, stack, extra)`.
+- Equity assertions are Monte Carlo. `WinProbabilityTester` seeds per instance for
+  reproducibility, but where a hand's true equity sits within a standard error or two of
+  a `get_hand_strength` category edge, assert with `assert_hand_strength_in` and a set of
+  acceptable labels — pinning one label there tests the sampler's luck, not the code.
 - `all_tests.py` imports each suite and calls its `test_*` functions directly, because
   the suites invoke their tests from a `__main__` block — plain `import` runs nothing.
   Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so its
