@@ -77,7 +77,9 @@ class PokerUI:
         frame1.pack(pady=10)
         ttk.Label(frame1, text="AI Opponents (1-9):").pack(side=tk.LEFT, padx=5)
         self.opponents_var = tk.StringVar(value="2")
-        ttk.Spinbox(frame1, from_=1, to=9, textvariable=self.opponents_var, width=10).pack(side=tk.LEFT, padx=5)
+        self.opponents_spinbox = ttk.Spinbox(frame1, from_=1, to=9, textvariable=self.opponents_var, width=10)
+        self.opponents_spinbox.pack(side=tk.LEFT, padx=5)
+        self.opponents_spinbox.bind('<FocusOut>', self._update_bot_type_selectors)
         
         # Starting stack
         frame2 = ttk.Frame(self.setup_screen)
@@ -85,6 +87,14 @@ class PokerUI:
         ttk.Label(frame2, text="Starting Stack ($):").pack(side=tk.LEFT, padx=5)
         self.stack_var = tk.StringVar(value="1000")
         ttk.Spinbox(frame2, from_=100, to=10000, textvariable=self.stack_var, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Bot types selection
+        bot_frame = ttk.LabelFrame(self.setup_screen, text="Bot Types")
+        bot_frame.pack(pady=10, padx=5, fill=tk.X)
+        self.bot_type_vars = {}  # Dictionary to store bot type selections
+        self.bot_type_frames = {}  # Dictionary to store frames for dynamic removal
+        self._create_bot_type_selectors(bot_frame)
+        self.bot_types_frame = bot_frame
         
         # Show equity option
         frame3 = ttk.Frame(self.setup_screen)
@@ -102,7 +112,35 @@ class PokerUI:
         
         # Game screen
         self.game_screen = ttk.Frame(self.root)
+    
+    def _create_bot_type_selectors(self, parent_frame):
+        """Create dropdown selectors for each bot opponent"""
+        # Clear existing bot type selectors
+        for frame in self.bot_type_frames.values():
+            frame.destroy()
+        self.bot_type_frames.clear()
+        self.bot_type_vars.clear()
         
+        num_opponents = int(self.opponents_var.get())
+        bot_types = ["TAG (Tight Aggressive)", "LAG (Loose Aggressive)", 
+                     "CTR (Call-Fold)", "NIT (Nitty)", "FISH (Loose-Passive)", "Random"]
+        bot_type_codes = ["TAG", "LAG", "CTR", "NIT", "FISH", "RANDOM"]
+        
+        for i in range(1, num_opponents + 1):
+            frame = ttk.Frame(parent_frame)
+            frame.pack(pady=5, padx=10, fill=tk.X)
+            self.bot_type_frames[i] = frame
+            
+            ttk.Label(frame, text=f"Opponent {i}:", width=12).pack(side=tk.LEFT, padx=5, anchor='w')
+            self.bot_type_vars[i] = tk.StringVar(value=bot_type_codes[(i - 1) % len(bot_type_codes)])
+            combo = ttk.Combobox(frame, values=bot_types, textvariable=self.bot_type_vars[i], state='readonly', width=25)
+            combo.pack(side=tk.LEFT, padx=5)
+    
+    def _update_bot_type_selectors(self, event=None):
+        """Update bot type selectors when number of opponents changes"""
+        self._create_bot_type_selectors(self.bot_types_frame)
+        
+
         # Title
         self.title_label = ttk.Label(self.game_screen, text="", font=("Arial", 16, "bold"))
         self.title_label.pack(pady=10)
@@ -271,11 +309,27 @@ class PokerUI:
                 messagebox.showerror("Error", "Opponents must be 1-9")
                 return
             
+            # Build bot_types dictionary from selected values
+            bot_types = {}
+            bot_type_map = {
+                "TAG (Tight Aggressive)": "TAG",
+                "LAG (Loose Aggressive)": "LAG",
+                "CTR (Call-Fold)": "CTR",
+                "NIT (Nitty)": "NIT",
+                "FISH (Loose-Passive)": "FISH",
+                "Random": None
+            }
+            
+            for i in range(1, num_opponents + 1):
+                selected = self.bot_type_vars[i].get()
+                bot_types[i] = bot_type_map.get(selected, "TAG")
+            
             self.game = PokerGame(
                 num_players=num_opponents + 1,
                 starting_stack=starting_stack,
                 small_blind=5,
-                big_blind=10
+                big_blind=10,
+                bot_types=bot_types
             )
             self.game.players[0].is_ai = False
             

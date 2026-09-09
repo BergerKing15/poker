@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-01-29T17:08:18.500925",
+  "summary": {
+    "TAG": {
+      "games_played": 1,
+      "hands_played": 50,
+      "wins": 0,
+      "win_rate": "0.0%",
+      "avg_stack": "$676",
+      "total_gain": "$-324",
+      "avg_gain_per_game": "$-324",
+      "hands_per_game": "50.0"
+    },
+    "Top10%": {
+      "games_played": 1,
+      "hands_played": 50,
+      "wins": 1,
+      "win_rate": "100.0%",
+      "avg_stack": "$1325",
+      "total_gain": "$325",
+      "avg_gain_per_game": "$325",
+      "hands_per_game": "50.0"
+    }
+  },
+  "stats": {
+    "TAG": {
+      "games_played": 1,
+      "hands_played": 50,
+      "wins": 0,
+      "total_gain": -324,
+      "final_stacks": [
+        676
+      ]
+    },
+    "Top10%": {
+      "games_played": 1,
+      "hands_played": 50,
+      "wins": 1,
+      "total_gain": 325,
+      "final_stacks": [
+        1325
+      ]
+    }
+  }
+}

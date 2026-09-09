@@ -37,6 +37,16 @@ class PokerBot:
         "FISH": PokerBotType("FISH (Loose-Passive)", 0.30, 0.20),       # Weak player
     }
     
+    # Shared win probability calculator (1 per process, not per bot)
+    _shared_win_prob_calc = None
+    
+    @classmethod
+    def get_shared_calculator(cls, num_simulations=200):
+        """Get or create shared WinProbabilityCalculator"""
+        if cls._shared_win_prob_calc is None:
+            cls._shared_win_prob_calc = WinProbabilityCalculator(num_simulations=num_simulations)
+        return cls._shared_win_prob_calc
+    
     def __init__(self, player_id: int, bot_type: Optional[str] = None):
         """
         Initialize a poker bot
@@ -53,7 +63,8 @@ class PokerBot:
             # Random type
             self.type = random.choice(list(self.TYPES.values()))
         
-        self.win_prob_calc = WinProbabilityCalculator(num_simulations=1000)
+        # Use shared calculator instead of creating new instance per bot
+        self.win_prob_calc = self.get_shared_calculator()
     
     def decide_action(
         self,
@@ -234,10 +245,14 @@ class PokerBot:
     ) -> Tuple[str, Optional[int]]:
         """Make final decision based on all factors"""
         
-        # Fold threshold adjusted by tightness and position
-        fold_threshold = (0.35 + (self.type.tightness * 0.30)) * position_multiplier
+        # Fold threshold strongly adjusted by tightness
+        # Loose players (LAG, FISH) fold less: 1.0 - 0.35 = 0.65 multiplier
+        # Tight players (TAG, NIT) fold more: 1.0 - 0.90 = 0.10 multiplier
+        looseness = 1.0 - self.type.tightness
+        fold_threshold = (0.20 + (self.type.tightness * 0.25)) * position_multiplier
+        fold_threshold = fold_threshold * (0.3 + looseness * 0.5)  # Loose players fold way less
         
-        # If checking is available, decide check vs bet
+        # If checking is available, decide check or bet
         if to_call == 0:
             return self._decide_check_or_bet(
                 equity, hand_strength, num_opponents, player_stack, current_bet
@@ -248,12 +263,13 @@ class PokerBot:
             return ("fold", None)
         
         # Call threshold - compare equity to pot odds
-        # If equity > pot_odds, it's +EV to call
-        call_threshold = pot_odds * 0.8  # Require slightly better odds due to variance
+        # Loose/aggressive players are willing to call with lower equity
+        call_threshold = pot_odds * (0.5 + self.type.aggression * 0.3)
         
-        if equity >= call_threshold or equity > 0.5:
-            # Consider raising
-            if random.random() < self.type.aggression and hand_strength > 0.4:
+        if equity >= call_threshold or equity > (0.35 - looseness * 0.15):
+            # Consider raising - aggressive players raise more often
+            raise_probability = self.type.aggression * (0.4 + looseness * 0.4)
+            if random.random() < raise_probability and hand_strength > (0.3 - looseness * 0.1):
                 raise_amount = self._calculate_raise_amount(
                     to_call, player_stack, pot_odds, hand_strength
                 )
@@ -274,11 +290,15 @@ class PokerBot:
     ) -> Tuple[str, Optional[int]]:
         """Decide between checking and betting when it's free"""
         
+        # Aggressive players bet more often, even with moderate hands
+        looseness = 1.0 - self.type.tightness
+        
         # Strong hands should bet
-        if hand_strength > 0.65 or (equity > 0.65 and num_opponents <= 2):
+        bet_threshold = 0.55 - (self.type.aggression * 0.15) - (looseness * 0.1)
+        if hand_strength > bet_threshold or (equity > 0.60 and num_opponents <= 2):
             if random.random() < self.type.aggression:
                 # Bet
-                bet_size = int(player_stack * 0.25)
+                bet_size = int(player_stack * (0.20 + self.type.aggression * 0.15))
                 return ("raise", bet_size)
         
         # Check with weaker hands
@@ -382,3 +402,414 @@ if __name__ == "__main__":
     manager = BotManager(5, mixed_types=True)
     for bot in manager.bots:
         print(f"Player {bot.player_id}: {bot}")
+
+
+# ============================================================================
+# SIMPLE STRATEGY BOTS FOR BASELINE COMPARISON AND ML TRAINING
+# ============================================================================
+
+class SimpleBotTop10Percent:
+    """Only plays top 10% of hands pre-flop, calls post-flop"""
+    
+    TOP_10_PERCENT = {
+        'AA', 'KK', 'QQ', 'JJ', 'TT',
+        'AK', 'AQ', 'AJ', 'AT',
+        'KQ', 'KJ',
+    }
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "Top10%"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Always fold unless top 10% hand pre-flop"""
+        if len(community_cards) == 0:  # Pre-flop
+            hand_key = self._get_hand_key(hole_cards)
+            if hand_key not in self.TOP_10_PERCENT:
+                return ("fold", None)
+        
+        # Post-flop: always call/check
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)  # All-in
+        else:
+            return ("call", None)
+    
+    def _get_hand_key(self, hole_cards):
+        """Get canonical hand representation (e.g., 'AK', 'JJ')"""
+        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
+                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+        v1, v2 = rank_order[r1], rank_order[r2]
+        if v1 == v2:
+            return f"{r1}{r2}"
+        else:
+            high, low = (r1, r2) if v1 > v2 else (r2, r1)
+            return f"{high}{low}"
+
+
+class SimpleBotAlwaysAllIn:
+    """Always goes all-in"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "AllIn"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Always go all-in"""
+        return ("raise", max(player_stack, to_call))
+
+
+class SimpleBotCheckCall:
+    """Always checks or calls, never raises or folds (except forced situations)"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "CheckCall"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Always check or call"""
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)  # All-in call
+        else:
+            return ("call", None)
+
+
+class SimpleBotNeverFold:
+    """Never folds, always calls or raises"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "NeverFold"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Never fold, always call or occasionally raise"""
+        if to_call == 0:
+            # Check or bet
+            if random.random() < 0.3:  # 30% chance to raise
+                return ("raise", int(player_stack * 0.1))
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)  # All-in
+        else:
+            # Occasionally raise instead of call
+            if random.random() < 0.2:
+                return ("raise", to_call * 2)
+            return ("call", None)
+
+
+class SimpleBotAlwaysRaise:
+    """Always raises pre-flop, calls post-flop"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "AlwaysRaise"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Always raise pre-flop, call post-flop"""
+        if len(community_cards) == 0:  # Pre-flop
+            if to_call == 0:
+                return ("raise", int(big_blind * 2))
+            elif to_call > player_stack:
+                return ("call", None)  # All-in
+            else:
+                return ("raise", max(to_call * 2, int(big_blind * 3)))
+        else:  # Post-flop
+            if to_call == 0:
+                return ("check", None)
+            elif to_call > player_stack:
+                return ("call", None)
+            else:
+                return ("call", None)
+
+
+class SimpleBotBottom50Percent:
+    """Only plays bottom 50% of hands (worst hands)"""
+    
+    BOTTOM_50_PERCENT = {
+        '72o', '73o', '74o', '75o', '76o', '77', '78o', '79o', '7T', '7Jo',
+        '82o', '83o', '84o', '85o', '86o', '87o', '88', '89o', '8T', '8Jo', '8Qo',
+        '92o', '93o', '94o', '95o', '96o', '97o', '98o', '99', '9T', '9Jo', '9Qo', '9Ko',
+        'T2o', 'T3o', 'T4o', 'T5o', 'T6o', 'T7o', 'T8o', 'T9o', 'TT', 'TJo', 'TQo',
+        'J2o', 'J3o', 'J4o', 'J5o', 'J6o', 'J7o', 'J8o', 'J9o', 'JT', 'JJ',
+        'Q2o', 'Q3o', 'Q4o', 'Q5o', 'Q6o', 'Q7o', 'Q8o', 'Q9o',
+        'K2o', 'K3o', 'K4o', 'K5o', 'K6o', 'K7o', 'K8o',
+        'A2o', 'A3o', 'A4o', 'A5o', 'A6o', 'A7o',
+    }
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "Bottom50%"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Only play worst 50% of hands"""
+        if len(community_cards) == 0:  # Pre-flop
+            hand_key = self._get_hand_key(hole_cards)
+            if hand_key not in self.BOTTOM_50_PERCENT:
+                return ("fold", None)
+        
+        # Post-flop: call/check
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)
+        else:
+            return ("call", None)
+    
+    def _get_hand_key(self, hole_cards):
+        """Get canonical hand representation"""
+        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
+                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+        v1, v2 = rank_order[r1], rank_order[r2]
+        if v1 == v2:
+            return f"{r1}{r2}"
+        else:
+            high, low = (r1, r2) if v1 > v2 else (r2, r1)
+            suited = "s" if hole_cards[0].suit == hole_cards[1].suit else "o"
+            return f"{high}{low}{suited}"
+
+
+class SimpleBotNeverBet:
+    """Folds most hands, only calls with premium hands"""
+    
+    PREMIUM_HANDS = {'AA', 'KK', 'QQ', 'AK', 'AQ'}
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "NeverBet"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Only call/check with premium hands pre-flop, fold post-flop"""
+        if len(community_cards) == 0:  # Pre-flop
+            hand_key = self._get_hand_key(hole_cards)
+            if hand_key not in self.PREMIUM_HANDS:
+                return ("fold", None)
+        else:  # Post-flop - fold most hands
+            if random.random() < 0.7:  # 70% fold rate post-flop
+                return ("fold", None)
+        
+        # Call/check when not folding
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)
+        else:
+            return ("call", None)
+    
+    def _get_hand_key(self, hole_cards):
+        """Get canonical hand representation"""
+        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10}
+        v1, v2 = rank_order.get(r1), rank_order.get(r2)
+        
+        if v1 is None or v2 is None:
+            return None  # Not a premium hand
+        
+        if v1 == v2:
+            return f"{r1}{r2}"
+        else:
+            high, low = (r1, r2) if v1 > v2 else (r2, r1)
+            return f"{high}{low}"
+
+
+class SimpleBotLimper:
+    """Limps pre-flop (calls without raising), calls post-flop"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "Limper"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Limp (min-call) pre-flop, call post-flop"""
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)  # All-in
+        else:
+            return ("call", None)  # Always just call (limp)
+
+
+class SimpleBotFolder:
+    """Folds almost everything except blinds"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "Folder"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Fold everything except big blind"""
+        if to_call == 0:
+            # In big blind, check
+            return ("check", None)
+        else:
+            # Fold almost everything
+            if random.random() < 0.95:  # 95% fold rate
+                return ("fold", None)
+            else:
+                # Occasionally call
+                if to_call > player_stack:
+                    return ("call", None)
+                else:
+                    return ("call", None)
+
+
+class SimpleBotPositionBased:
+    """Play loose in late position, tight in early position"""
+    
+    EARLY_HANDS = {'AA', 'KK', 'QQ', 'JJ', 'AK', 'AQ'}
+    LATE_HANDS = {
+        'AA', 'KK', 'QQ', 'JJ', 'TT', 'AK', 'AQ', 'AJ', 'AT',
+        'KQ', 'KJ', 'QJ', '22', '33', '44', '55', '66', '77', '88', '99',
+    }
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "PositionBased"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Play position-based hand selection"""
+        if len(community_cards) == 0:  # Pre-flop
+            hand_key = self._get_hand_key(hole_cards)
+            
+            if position == "early":
+                allowed_hands = self.EARLY_HANDS
+            elif position == "late":
+                allowed_hands = self.LATE_HANDS
+            else:  # middle
+                allowed_hands = self.LATE_HANDS
+            
+            if hand_key not in allowed_hands:
+                return ("fold", None)
+        
+        # Post-flop: call/check
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)
+        else:
+            return ("call", None)
+    
+    def _get_hand_key(self, hole_cards):
+        """Get canonical hand representation"""
+        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
+                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+        v1, v2 = rank_order[r1], rank_order[r2]
+        if v1 == v2:
+            return f"{r1}{r2}"
+        else:
+            high, low = (r1, r2) if v1 > v2 else (r2, r1)
+            return f"{high}{low}"
+
+
+class SimpleBotStackBased:
+    """Adjusts strategy based on stack depth"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "StackBased"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Play tighter/looser based on stack depth"""
+        stack_depth = player_stack / big_blind if big_blind > 0 else 0
+        
+        if len(community_cards) == 0:  # Pre-flop
+            hand_key = self._get_hand_key(hole_cards)
+            
+            # Determine hand quality
+            rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
+                          '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+            r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+            v1, v2 = rank_order[r1], rank_order[r2]
+            avg_value = (v1 + v2) / 2
+            is_pair = r1 == r2
+            
+            # Deep stacks: play loose
+            if stack_depth > 50:
+                if avg_value < 7 and not is_pair:
+                    return ("fold", None)
+            # Medium stacks: play normal
+            elif stack_depth > 20:
+                if avg_value < 5 and not is_pair:
+                    return ("fold", None)
+            # Short stacks: play tight
+            else:
+                if avg_value < 10 or (is_pair and v1 < 8):
+                    return ("fold", None)
+        
+        # Post-flop: call/check
+        if to_call == 0:
+            return ("check", None)
+        elif to_call > player_stack:
+            return ("call", None)
+        else:
+            return ("call", None)
+    
+    def _get_hand_key(self, hole_cards):
+        """Get canonical hand representation"""
+        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
+                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+        v1, v2 = rank_order[r1], rank_order[r2]
+        if v1 == v2:
+            return f"{r1}{r2}"
+        else:
+            high, low = (r1, r2) if v1 > v2 else (r2, r1)
+            return f"{high}{low}"
+
+
+class SimpleBotRandom:
+    """Plays completely randomly"""
+    
+    def __init__(self, player_id: int):
+        self.player_id = player_id
+        self.name = "Random"
+    
+    def decide_action(self, hole_cards, community_cards, current_bet, to_call,
+                      player_stack, pot, position, num_opponents,
+                      small_blind, big_blind):
+        """Random action"""
+        action = random.choice(["fold", "check/call", "raise"])
+        
+        if action == "fold":
+            return ("fold", None)
+        elif action == "check/call":
+            if to_call == 0:
+                return ("check", None)
+            else:
+                amount = min(to_call, player_stack)
+                return ("call", None)
+        else:  # raise
+            if to_call == 0:
+                raise_amount = random.randint(1, int(player_stack * 0.5))
+                return ("raise", raise_amount)
+            else:
+                raise_amount = min(random.randint(to_call, int(player_stack * 0.7)), player_stack)
+                return ("raise", raise_amount)
+

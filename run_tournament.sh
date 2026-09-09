@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Quick tournament runner script
+
+echo "Poker Bot Tournament Runner"
+echo "============================"
+echo ""
+echo "Available commands:"
+echo ""
+echo "1. Full tournament (best for ML training):"
+echo "   python bot_tourney.py"
+echo ""
+echo "2. Quick test (2-3 minutes):"
+echo "   python test_tourney_quick.py"
+echo ""
+echo "3. View last results:"
+echo "   cat tournament_results.json | python -m json.tool"
+echo ""
+echo "Bot types available:"
+echo "  - AI Bots: TAG, LAG, CTR, NIT, FISH"
+echo "  - Baseline: Top10%, AllIn, CheckCall, Random"
+echo ""

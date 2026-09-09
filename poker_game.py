@@ -140,7 +140,7 @@ class Player:
 class PokerGame:
     DEBUG = False  # Toggle for print output
     
-    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10, use_bots=True):
+    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10, use_bots=True, bot_types=None):
         self.players = [Player(i, starting_stack) for i in range(num_players)]
         self.small_blind = small_blind
         self.big_blind = big_blind
@@ -157,6 +157,7 @@ class PokerGame:
         # Bot system
         self.use_bots = use_bots
         self.bots = {}  # Map player_id to PokerBot instance
+        self.bot_types = bot_types or {}  # Map player_id to bot type string
         
         if use_bots:
             self._initialize_bots(num_players)
@@ -171,11 +172,15 @@ class PokerGame:
         try:
             from poker_bot import PokerBot
             
-            # Create mixed bot types for variety
-            bot_types = ["TAG", "LAG", "CTR", "NIT", "FISH"]
+            # Default bot types for variety
+            default_bot_types = ["TAG", "LAG", "CTR", "NIT", "FISH"]
             
             for i in range(1, num_players):  # Player 0 is the human
-                bot_type = bot_types[(i - 1) % len(bot_types)]
+                # Use custom bot type if provided, otherwise use default
+                if i in self.bot_types:
+                    bot_type = self.bot_types[i]
+                else:
+                    bot_type = default_bot_types[(i - 1) % len(default_bot_types)]
                 self.bots[i] = PokerBot(i, bot_type)
         except ImportError:
             if self.DEBUG:
@@ -385,13 +390,21 @@ class PokerGame:
 
         current_player_idx = first_to_act
         players_who_acted_this_level = set()
+        max_iterations = len(self.players) * 100  # Upper limit for safety
+        iteration_count = 0
         
         while True:
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                if self.DEBUG:
+                    print(f"WARNING: Betting round exceeded {max_iterations} iterations, forcing termination")
+                break
+            
             player = self.players[current_player_idx]
 
             if player.is_folded or player.is_all_in:
                 current_player_idx = (current_player_idx + 1) % len(self.players)
-                continue
+                continue  # Skip and continue without counting as progress
 
             to_call = self.current_bet - player.total_bet_this_round
 
@@ -415,8 +428,12 @@ class PokerGame:
                 else:
                     action = input("Your action (call/raise/fold): ").lower().strip()
 
+            action_taken = False  # Track if action actually changed state
+            
             if action == "fold":
                 player.is_folded = True
+                action_taken = True
+                iterations_without_progress = 0
                 if self.DEBUG:
                     print(f"Player {player.player_id} folds")
             elif action == "call":
@@ -425,6 +442,8 @@ class PokerGame:
                     player.stack -= bet_amount
                     player.total_bet_this_round += bet_amount
                     self.pot += bet_amount
+                    action_taken = True
+                    iterations_without_progress = 0
                     if bet_amount == to_call and player.stack == 0:
                         player.is_all_in = True
                         if self.DEBUG:
@@ -447,6 +466,8 @@ class PokerGame:
                 player.total_bet_this_round += bet_amount
                 self.pot += bet_amount
                 self.current_bet = player.total_bet_this_round
+                action_taken = True
+                iterations_without_progress = 0
                 if player.stack == 0:
                     player.is_all_in = True
                     if self.DEBUG:
@@ -456,13 +477,33 @@ class PokerGame:
                 players_who_acted_this_level = {player.player_id}  # Reset who has acted
             elif action == "check":
                 if to_call == 0:
+                    action_taken = True
+                    iterations_without_progress = 0
                     if self.DEBUG:
                         print(f"Player {player.player_id} checks")
                 else:
+                    # Invalid action - player must call or fold, force call
                     if self.DEBUG:
-                        print(f"Player {player.player_id} can't check, must call or fold")
+                        print(f"Player {player.player_id} attempted check but to_call=${to_call}, forcing call")
+                    bet_amount = min(to_call, player.stack)
+                    if bet_amount > 0:
+                        player.stack -= bet_amount
+                        player.total_bet_this_round += bet_amount
+                        self.pot += bet_amount
+                        action_taken = True
+                        iterations_without_progress = 0
+                    if player.stack == 0:
+                        player.is_all_in = True
+            else:
+                # Unexpected action, force fold
+                if self.DEBUG:
+                    print(f"Player {player.player_id} returned unexpected action '{action}', forcing fold")
+                player.is_folded = True
+                action_taken = True
+                iterations_without_progress = 0
 
-            players_who_acted_this_level.add(player.player_id)
+            if action_taken:
+                players_who_acted_this_level.add(player.player_id)
             
             # Check if betting round is complete
             active_players = [p for p in self.players if not p.is_folded]

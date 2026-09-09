@@ -115,9 +115,12 @@ class WinProbabilityCalculator:
         
         # Evaluate all hands
         player_hand = HandEvaluator.find_best_hand(player_hole_cards, remaining_community)
+        if not player_hand:
+            return "loss"  # No valid hand for player
+        
         player_rank = HandEvaluator.HAND_RANKS[player_hand[0]]
         player_info = HandEvaluator.evaluate_hand(player_hand[1])
-        player_tiebreaker = player_info[1]
+        player_tiebreaker = player_info[1] if player_info else ()
         
         # Check opponent hands
         best_opponent_rank = 0
@@ -126,9 +129,12 @@ class WinProbabilityCalculator:
         
         for opp_hole in opponent_cards:
             opp_hand = HandEvaluator.find_best_hand(opp_hole, remaining_community)
+            if not opp_hand:
+                continue  # Skip if no valid hand
+            
             opp_rank = HandEvaluator.HAND_RANKS[opp_hand[0]]
             opp_info = HandEvaluator.evaluate_hand(opp_hand[1])
-            opp_tiebreaker = opp_info[1]
+            opp_tiebreaker = opp_info[1] if opp_info else ()
             
             # Compare with current best
             if opp_rank > best_opponent_rank:
@@ -142,7 +148,9 @@ class WinProbabilityCalculator:
         if player_rank > best_opponent_rank:
             return "win"
         elif player_rank == best_opponent_rank:
-            if player_tiebreaker > best_opponent_tiebreaker:
+            if best_opponent_tiebreaker is None:
+                return "win"  # No valid opponent hands
+            elif player_tiebreaker > best_opponent_tiebreaker:
                 return "win"
             elif player_tiebreaker == best_opponent_tiebreaker:
                 # Tie with at least one opponent
@@ -266,9 +274,13 @@ class WinProbabilityCalculator:
             
             # Evaluate player hand
             player_hand = HandEvaluator.find_best_hand(player_hole_cards, remaining_community)
+            if not player_hand:
+                losses += 1
+                continue
+            
             player_rank = HandEvaluator.HAND_RANKS[player_hand[0]]
             player_info = HandEvaluator.evaluate_hand(player_hand[1])
-            player_tiebreaker = player_info[1]
+            player_tiebreaker = player_info[1] if player_info else ()
             
             # Evaluate opponent hands
             best_opponent_rank = 0
@@ -276,21 +288,26 @@ class WinProbabilityCalculator:
             
             for opp_hole in opponent_hands:
                 opp_hand = HandEvaluator.find_best_hand(opp_hole, remaining_community)
+                if not opp_hand:
+                    continue  # Skip if no valid hand
+                
                 opp_rank = HandEvaluator.HAND_RANKS[opp_hand[0]]
                 opp_info = HandEvaluator.evaluate_hand(opp_hand[1])
-                opp_tiebreaker = opp_info[1]
+                opp_tiebreaker = opp_info[1] if opp_info else ()
                 
                 if opp_rank > best_opponent_rank:
                     best_opponent_rank = opp_rank
                     best_opponent_tiebreaker = opp_tiebreaker
-                elif opp_rank == best_opponent_rank and opp_tiebreaker > best_opponent_tiebreaker:
+                elif best_opponent_tiebreaker is not None and opp_rank == best_opponent_rank and opp_tiebreaker > best_opponent_tiebreaker:
                     best_opponent_tiebreaker = opp_tiebreaker
             
             # Determine result
             if player_rank > best_opponent_rank:
                 wins += 1
             elif player_rank == best_opponent_rank:
-                if player_tiebreaker > best_opponent_tiebreaker:
+                if best_opponent_tiebreaker is None:
+                    wins += 1  # No valid opponent hands
+                elif player_tiebreaker > best_opponent_tiebreaker:
                     wins += 1
                 elif player_tiebreaker == best_opponent_tiebreaker:
                     ties += 1
