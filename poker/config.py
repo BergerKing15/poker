@@ -2,6 +2,13 @@
 Configuration constants for Poker AI application
 """
 
+from pathlib import Path
+
+# Resolved from this file so the paths hold no matter the working directory.
+PACKAGE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_ROOT.parent
+ASSETS_DIR = PROJECT_ROOT / "assets"
+
 # UI Configuration
 UI_WINDOW_WIDTH = 1200
 UI_WINDOW_HEIGHT = 900
@@ -30,6 +37,7 @@ DEFAULT_BOT_TYPE = "TAG"  # Tight-Aggressive
 # UI Appearance
 CARD_IMAGE_FORMAT = ".png"
 CARDS_DIRECTORY = "cards-png-100px"
+CARDS_DIR = ASSETS_DIR / CARDS_DIRECTORY
 
 # Debug/Logging
 ENABLE_DEBUG = False  # Set to True for verbose output

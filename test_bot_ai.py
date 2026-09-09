@@ -4,9 +4,9 @@ Test script demonstrating the poker bot AI system
 
 import itertools
 
-import poker_bot
-from poker_game import PokerGame, Card
-from poker_bot import PokerBot, hand_key
+from poker import bot as poker_bot
+from poker.game import PokerGame, Card
+from poker.bot import PokerBot, hand_key
 
 def test_bot_types():
     """Display and test different bot types"""

@@ -239,7 +239,7 @@ class PokerGame:
     def _initialize_bots(self, num_players: int):
         """Initialize poker bots for AI players"""
         try:
-            from poker_bot import PokerBot
+            from poker.bot import PokerBot
             
             # Default bot types for variety
             default_bot_types = ["TAG", "LAG", "CTR", "NIT", "FISH"]

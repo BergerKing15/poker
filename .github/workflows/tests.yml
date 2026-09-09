@@ -30,22 +30,20 @@ jobs:
         sudo apt-get install -y xvfb
 
     - name: Verify installation
-      run: python verify_installation.py
+      run: python -m tools.verify_installation
 
     - name: Test all bot type imports
       run: python test_all_bots.py
 
-    - name: Syntax check all core files
+    - name: Syntax check all package files
       run: |
-        python -m py_compile \
-          poker_game.py poker_bot.py poker_ui.py win_probability.py \
-          bot_tourney.py tournament_ui.py console.py config.py
-        echo "All core files pass syntax validation"
+        python -m compileall -q poker tools scripts
+        echo "All package files pass syntax validation"
 
     - name: Test bot instantiation and interface
       run: |
         python - <<'EOF'
-        from poker_bot import (
+        from poker.bot import (
             PokerBot,
             SimpleBotTop10Percent, SimpleBotAlwaysAllIn, SimpleBotCheckCall,
             SimpleBotRandom, SimpleBotNeverFold, SimpleBotAlwaysRaise,
@@ -74,8 +72,8 @@ jobs:
     - name: Every registered bot type can play a hand
       run: |
         python - <<'EOF'
-        from bot_tourney import BotTournament
-        from poker_game import PokerGame
+        from poker.tournament import BotTournament
+        from poker.game import PokerGame
 
         # Exercise each factory entry against the real engine. _bot_decision
         # swallows bot exceptions and falls back to the simple AI, so a broken
@@ -94,15 +92,15 @@ jobs:
 
     - name: Code quality checks
       run: |
-        python -c "import poker_game, poker_ui, win_probability, poker_bot, console"
+        python -c "import poker.game, poker.ui.game_window, poker.equity, poker.bot"
         echo "Import chain intact"
-        python check_prints.py
+        python -m tools.check_prints
 
     - name: Performance check
       run: |
         python - <<'EOF'
         import time
-        from poker_game import Card, HandEvaluator
+        from poker.game import Card, HandEvaluator
 
         # Note: Card.RANKS spells ten as "10"; "T" is not a valid rank.
         test_hand = [Card('Spades', 'A'), Card('Hearts', 'K'), Card('Clubs', 'Q'),

@@ -7,8 +7,8 @@ Uses GameTester from game_test_suite.py for common assertion utilities
 import random
 
 from game_test_suite import GameTester
-from win_probability import WinProbabilityCalculator
-from poker_game import Card
+from poker.equity import WinProbabilityCalculator
+from poker.game import Card
 
 
 class WinProbabilityTester(GameTester):

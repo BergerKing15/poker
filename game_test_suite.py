@@ -1,6 +1,6 @@
 import random
 from typing import List, Dict, Any, Optional, Callable
-from poker_game import PokerGame, Card, Deck, Player, HandEvaluator, GameObserver, GameAborted
+from poker.game import PokerGame, Card, Deck, Player, HandEvaluator, GameObserver, GameAborted
 
 
 class GameScriptAction:

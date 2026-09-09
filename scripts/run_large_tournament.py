@@ -7,7 +7,7 @@ Designed to take ~5 minutes with progress updates every 15 seconds.
 import sys
 sys.path.insert(0, '/home/noahberg/Projects/PokerAI')
 
-from bot_tourney import BotTournament
+from poker.tournament import BotTournament
 
 def main():
     print("\n" + "="*80)

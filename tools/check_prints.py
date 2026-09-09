@@ -9,15 +9,15 @@ run and the warning stopped meaning anything.
 import ast
 import sys
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 # Modules that must not print during normal operation.
-CHECKED = ["poker_game.py", "poker_bot.py", "win_probability.py", "config.py"]
+CHECKED = ["poker/game.py", "poker/bot.py", "poker/equity.py", "poker/config.py"]
 
 # Prints that are the program's actual output rather than stray logging.
 # ("file", "enclosing function") -> why it is allowed.
 ALLOWED = {
-    ("poker_game.py", "get_human_action"):
+    ("poker/game.py", "get_human_action"):
         "ConsoleObserver's terminal prompt - this is the front-end's own "
         "output, not stray logging from the engine",
 }

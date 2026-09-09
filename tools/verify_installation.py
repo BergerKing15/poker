@@ -3,7 +3,7 @@
 Verification script for Poker Bot AI installation
 """
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 import sys
 
@@ -11,9 +11,9 @@ def check_imports():
     """Check all required imports"""
     print("Checking imports...", end=" ")
     try:
-        from poker_game import PokerGame, Card, HandEvaluator
-        from poker_bot import PokerBot, PokerBotType
-        from win_probability import WinProbabilityCalculator
+        from poker.game import PokerGame, Card, HandEvaluator
+        from poker.bot import PokerBot, PokerBotType
+        from poker.equity import WinProbabilityCalculator
         print("✓")
         return True
     except ImportError as e:
@@ -23,7 +23,7 @@ def check_imports():
 def check_bot_types():
     """Check bot types are defined"""
     print("Checking bot types...", end=" ")
-    from poker_bot import PokerBot
+    from poker.bot import PokerBot
     
     expected_types = {"TAG", "LAG", "CTR", "NIT", "FISH"}
     actual_types = set(PokerBot.TYPES.keys())
@@ -39,7 +39,7 @@ def check_game_creation():
     """Check game can be created with bots"""
     print("Creating game with bots...", end=" ")
     try:
-        from poker_game import PokerGame
+        from poker.game import PokerGame
         game = PokerGame(num_players=4, use_bots=True)
         
         # Verify bots created
@@ -58,8 +58,8 @@ def check_bot_decision():
     """Check bot can make decisions"""
     print("Testing bot decision making...", end=" ")
     try:
-        from poker_game import Card
-        from poker_bot import PokerBot
+        from poker.game import Card
+        from poker.bot import PokerBot
         
         bot = PokerBot(0, "TAG")
         hole = [Card("Spades", "A"), Card("Hearts", "K")]
@@ -92,8 +92,8 @@ def check_equity():
     """Check win probability calculation"""
     print("Testing equity calculation...", end=" ")
     try:
-        from poker_game import Card
-        from win_probability import WinProbabilityCalculator
+        from poker.game import Card
+        from poker.equity import WinProbabilityCalculator
         
         calc = WinProbabilityCalculator(num_simulations=100)
         hole = [Card("Spades", "A"), Card("Hearts", "A")]
@@ -116,11 +116,11 @@ def check_files():
     import os
     
     required = [
-        "poker_game.py",
-        "poker_bot.py",
-        "win_probability.py",
-        "poker_ui.py",
-        "game_test_suite.py",
+        "poker/game.py",
+        "poker/bot.py",
+        "poker/equity.py",
+        "poker/ui/game_window.py",
+        "poker/tournament.py",
         "docs/BOT_AI_GUIDE.md",
         "docs/BOT_QUICK_REFERENCE.md",
     ]
@@ -164,9 +164,9 @@ if __name__ == "__main__":
         print("=" * 60)
         print("\nYour Poker Bot AI system is ready!")
         print("\nQuick start:")
-        print("  python poker_ui.py          # Play the game")
-        print("  python test_bot_ai.py       # Test AI system")
-        print("  python game_test_suite.py   # Run all tests")
+        print("  python play.py              # Play the game")
+        print("  python run_tournament.py    # Run a bot tournament")
+        print("  python all_tests.py         # Run all tests")
         print("\nDocumentation:")
         print("  docs/BOT_AI_GUIDE.md        # Comprehensive guide")
         print("  docs/BOT_QUICK_REFERENCE.md # Quick reference")

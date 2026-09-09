@@ -5,11 +5,11 @@ import time
 import os
 from typing import Optional
 from PIL import Image, ImageTk
-from poker_game import PokerGame, HandEvaluator, GameObserver, GameAborted
-from win_probability import WinProbabilityCalculator
-from config import (
+from poker.game import PokerGame, HandEvaluator, GameObserver, GameAborted
+from poker.equity import WinProbabilityCalculator
+from poker.config import (
     UI_WINDOW_WIDTH, UI_WINDOW_HEIGHT, UI_BG_COLOR,
-    DEFAULT_AI_DELAY, NUM_SIMULATIONS_SETUP, CARDS_DIRECTORY,
+    DEFAULT_AI_DELAY, NUM_SIMULATIONS_SETUP, CARDS_DIR,
     MAX_AI_DELAY, MIN_AI_DELAY, AI_DELAY_INCREMENT
 )
 
@@ -48,7 +48,7 @@ class PokerUI(GameObserver):
         
     def load_card_images(self):
         """Load all card PNG images into memory"""
-        cards_dir = os.path.join(os.path.dirname(__file__), CARDS_DIRECTORY)
+        cards_dir = str(CARDS_DIR)
         if os.path.exists(cards_dir):
             for filename in os.listdir(cards_dir):
                 if filename.endswith(".png"):
@@ -752,7 +752,12 @@ class PokerUI(GameObserver):
         self.history_text.config(state=tk.DISABLED)
 
 
-if __name__ == "__main__":
+def main():
+    """Open the poker table."""
     root = tk.Tk()
-    ui = PokerUI(root)
+    PokerUI(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

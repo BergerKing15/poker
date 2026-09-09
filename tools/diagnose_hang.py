@@ -4,13 +4,13 @@ Diagnostic tool to find which hand causes the tournament to hang.
 Runs games with detailed per-hand timing and logs.
 """
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 import sys
 import time
 import signal
-from poker_game import PokerGame
-from poker_bot import PokerBot, SimpleBotCheckCall, SimpleBotRandom
+from poker.game import PokerGame
+from poker.bot import PokerBot, SimpleBotCheckCall, SimpleBotRandom
 
 def timeout_handler(signum, frame):
     raise TimeoutError("Hand execution timeout - infinite loop detected")

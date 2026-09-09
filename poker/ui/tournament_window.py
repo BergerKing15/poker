@@ -1,5 +1,5 @@
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 import tkinter as tk
 from tkinter import ttk
 import threading
@@ -225,8 +225,8 @@ def run_tournament_with_ui(bot_configs, num_games_per_config, small_blind=1, big
     Returns:
         tournament_results: Dict with all game results
     """
-    from poker_game import PokerGame
-    from poker_bot import (
+    from poker.game import PokerGame
+    from poker.bot import (
         PokerBot, SimpleBotTop10Percent, SimpleBotAlwaysAllIn,
         SimpleBotCheckCall, SimpleBotRandom, SimpleBotNeverFold,
         SimpleBotAlwaysRaise, SimpleBotBottom50Percent, SimpleBotNeverBet,
@@ -354,7 +354,7 @@ def run_tournament_with_ui(bot_configs, num_games_per_config, small_blind=1, big
 if __name__ == "__main__":
     enable_utf8_output()
     # Example usage
-    from bot_tourney import get_tournament_configs
+    from poker.tournament import get_tournament_configs
     
     configs = get_tournament_configs()
     results = run_tournament_with_ui(configs, 20)

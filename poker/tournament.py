@@ -4,7 +4,7 @@ Bot Tournament Runner - Runs thousands of hands to compare bot strategies
 Generates ML training data and performance statistics
 """
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 import json
 import time
@@ -12,8 +12,8 @@ import threading
 from datetime import datetime
 from collections import defaultdict
 from typing import Dict, List, Any
-from poker_game import PokerGame, Player
-from poker_bot import (
+from poker.game import PokerGame, Player
+from poker.bot import (
     PokerBot, SimpleBotTop10Percent, SimpleBotAlwaysAllIn,
     SimpleBotCheckCall, SimpleBotRandom, SimpleBotNeverFold,
     SimpleBotAlwaysRaise, SimpleBotBottom50Percent, SimpleBotNeverBet,
@@ -511,7 +511,7 @@ def main_with_ui():
     ]
     
     try:
-        from tournament_ui import run_tournament_with_ui
+        from poker.ui.tournament_window import run_tournament_with_ui
         
         # Convert configs to list format for UI
         bot_configs = []

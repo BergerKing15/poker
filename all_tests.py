@@ -8,7 +8,7 @@ import importlib
 import sys
 import time
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 enable_utf8_output()
 
@@ -75,7 +75,7 @@ def main():
     print()
 
     # Keep engine debug output out of the test log.
-    from poker_game import PokerGame
+    from poker.game import PokerGame
     PokerGame.DEBUG = False
 
     GameTester.reset_totals()

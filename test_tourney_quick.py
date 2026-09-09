@@ -1,5 +1,5 @@
 """Quick test of bot_tourney"""
-from bot_tourney import BotTournament
+from poker.tournament import BotTournament
 
 # Small test
 configs = [

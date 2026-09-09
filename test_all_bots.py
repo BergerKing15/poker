@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Test that all bot types load correctly"""
 
-from console import enable_utf8_output
+from poker.console import enable_utf8_output
 
 enable_utf8_output()
 
-from bot_tourney import BotTournament
+from poker.tournament import BotTournament
 
 t = BotTournament()
 print(f"✓ {len(t.BOT_FACTORY)} bot types loaded:\n")

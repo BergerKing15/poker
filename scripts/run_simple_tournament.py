@@ -7,7 +7,7 @@ Designed to take ~2-3 minutes and complete without hangs.
 import sys
 sys.path.insert(0, '/home/noahberg/Projects/PokerAI')
 
-from bot_tourney import BotTournament
+from poker.tournament import BotTournament
 
 def main():
     print("\n" + "="*80)

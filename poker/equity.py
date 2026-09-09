@@ -1,6 +1,6 @@
 import random
 from typing import List, Tuple, Dict, Optional
-from poker_game import Card, Deck, HandEvaluator
+from poker.game import Card, Deck, HandEvaluator
 
 
 class WinProbabilityCalculator:
@@ -345,7 +345,7 @@ class WinProbabilityCalculator:
 
 # Example usage and testing
 if __name__ == "__main__":
-    from poker_game import Card
+    from poker.game import Card
     
     calculator = WinProbabilityCalculator(num_simulations=10000)
     

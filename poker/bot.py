@@ -4,8 +4,8 @@ Enhanced AI player for Texas Hold'em using game theory and win probability
 
 import random
 from typing import List, Tuple, Optional
-from poker_game import Card, HandEvaluator
-from win_probability import WinProbabilityCalculator
+from poker.game import Card, HandEvaluator
+from poker.equity import WinProbabilityCalculator
 
 
 class PokerBotType:
