@@ -1,6 +1,6 @@
 import random
 from typing import List, Dict, Any, Optional, Callable
-from poker_game import PokerGame, Card, Deck, Player, HandEvaluator
+from poker_game import PokerGame, Card, Deck, Player, HandEvaluator, GameObserver, GameAborted
 
 
 class GameScriptAction:
@@ -926,6 +926,159 @@ def test_stage_parameter_propagation():
     return tester
 
 
+
+class ScriptedObserver(GameObserver):
+    """Stands in for a front-end: supplies human actions, records hook calls.
+
+    The Tk UI's human path cannot be exercised without a display, so these
+    tests drive the same hooks the UI implements.
+    """
+
+    def __init__(self, actions, defer_bots=0):
+        self.actions = list(actions)
+        self.events = []
+        self.defer_bots = defer_bots
+        self.deferred = 0
+
+    def on_hand_start(self, game):
+        self.events.append("hand_start")
+
+    def on_blinds(self, game, small_blind_player, big_blind_player):
+        self.events.append("blinds")
+
+    def on_stage(self, game, stage):
+        self.events.append(f"stage:{stage}")
+
+    def on_showdown(self, game):
+        self.events.append("showdown")
+
+    def on_hand_end(self, game, winner_info):
+        self.events.append("hand_end")
+
+    def on_action(self, game, player, action, amount, stage):
+        self.events.append(f"action:{player.player_id}:{action}")
+
+    def before_ai_action(self, game, player, to_call, stage):
+        if self.deferred < self.defer_bots:
+            self.deferred += 1
+            return False
+        return True
+
+    def get_human_action(self, game, player, to_call, stage):
+        if not self.actions:
+            raise GameAborted()
+        return self.actions.pop(0)
+
+
+def test_observer_hand_lifecycle():
+    """The engine must call the front-end hooks in a sensible order."""
+    print("\nTesting Observer Hand Lifecycle...")
+    tester = GameTester()
+
+    obs = ScriptedObserver([("check", None)] * 8)
+    game = PokerGame(num_players=2, starting_stack=1000, small_blind=5,
+                     big_blind=10, use_bots=True, observer=obs)
+    game.players[0].is_ai = False
+    game.play_hand()
+
+    tester.assert_equal(obs.events[0], "hand_start", "hand_start fires first")
+    tester.assert_equal(obs.events[1], "blinds", "blinds fire before any street")
+    tester.assert_true("stage:Pre-Flop" in obs.events, "pre-flop stage announced")
+    tester.assert_equal(obs.events[-1], "hand_end", "hand_end fires last")
+    tester.assert_true(any(e.startswith("action:") for e in obs.events),
+                       "actions are reported to the observer")
+
+    tester.print_summary()
+    return tester
+
+
+def test_observer_human_action_reaches_engine():
+    """A human raise supplied by the front-end must move real chips."""
+    print("\nTesting Observer Human Action...")
+    tester = GameTester()
+
+    obs = ScriptedObserver([("raise", 120)] + [("check", None)] * 8)
+    game = PokerGame(num_players=2, starting_stack=1000, small_blind=5,
+                     big_blind=10, use_bots=True, observer=obs)
+    game.players[0].is_ai = False
+    game.play_hand()
+
+    raised = [e for e in obs.events if e == "action:0:raise"]
+    tester.assert_true(bool(raised), "human raise reached the engine")
+    tester.assert_equal(sum(p.stack for p in game.players), 2000,
+                        "chips conserved across a human-driven hand")
+
+    tester.print_summary()
+    return tester
+
+
+def test_observer_abort_propagates():
+    """A front-end that goes away mid-hand stops the hand."""
+    print("\nTesting Observer Abort...")
+    tester = GameTester()
+
+    obs = ScriptedObserver([])  # first human turn raises GameAborted
+    game = PokerGame(num_players=2, starting_stack=1000, use_bots=True,
+                     observer=obs)
+    game.players[0].is_ai = False
+
+    aborted = False
+    try:
+        game.play_hand()
+    except GameAborted:
+        aborted = True
+    tester.assert_true(aborted, "GameAborted propagates out of play_hand")
+
+    tester.print_summary()
+    return tester
+
+
+def test_observer_deferred_bot():
+    """Deferring a bot (the UI's skip-to-my-turn) must not hang the round."""
+    print("\nTesting Observer Deferred Bot...")
+    tester = GameTester()
+
+    obs = ScriptedObserver([("call", None)] + [("check", None)] * 8, defer_bots=3)
+    game = PokerGame(num_players=3, starting_stack=1000, small_blind=5,
+                     big_blind=10, use_bots=True, observer=obs)
+    game.players[0].is_ai = False
+    game.play_hand()
+
+    tester.assert_equal(obs.deferred, 3, "bot turns were deferred")
+    tester.assert_equal(obs.events[-1], "hand_end", "hand still completed")
+    tester.assert_equal(sum(p.stack for p in game.players), 3000,
+                        "chips conserved despite deferrals")
+
+    tester.print_summary()
+    return tester
+
+
+def test_split_pot_conserves_chips():
+    """A split pot must not mint chips when it divides evenly."""
+    print("\nTesting Split Pot Chip Conservation...")
+    tester = GameTester()
+
+    game = PokerGame(num_players=2, starting_stack=1000, small_blind=5,
+                     big_blind=10, use_bots=False)
+    game.deck = Deck()
+    # Identical hands: the pot must split exactly, with no odd chip invented.
+    game.players[0].hole_cards = [Card("Spades", "A"), Card("Hearts", "K")]
+    game.players[1].hole_cards = [Card("Diamonds", "A"), Card("Clubs", "K")]
+    game.community_cards = [Card("Spades", "2"), Card("Hearts", "5"),
+                            Card("Clubs", "9"), Card("Diamonds", "J"),
+                            Card("Spades", "Q")]
+    game.players[0].stack = 900
+    game.players[1].stack = 900
+    game.pot = 200
+    game.determine_winner()
+
+    tester.assert_equal(sum(p.stack for p in game.players), 2000,
+                        "split pot conserves chips exactly")
+
+    tester.print_summary()
+    return tester
+
+
 if __name__ == "__main__":
     print("="*60)
     print("POKER GAME TEST SUITE")
@@ -952,6 +1105,11 @@ if __name__ == "__main__":
     test_betting_order()
     test_action_sequence()
     test_stage_parameter_propagation()
+    test_observer_hand_lifecycle()
+    test_observer_human_action_reaches_engine()
+    test_observer_abort_propagates()
+    test_observer_deferred_bot()
+    test_split_pot_conserves_chips()
     
     print("\n" + "="*60)
     print("All tests completed!")

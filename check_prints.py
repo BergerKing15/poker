@@ -17,9 +17,9 @@ CHECKED = ["poker_game.py", "poker_bot.py", "win_probability.py", "config.py"]
 # Prints that are the program's actual output rather than stray logging.
 # ("file", "enclosing function") -> why it is allowed.
 ALLOWED = {
-    ("poker_game.py", "betting_round"):
-        "console prompt shown to a human player before input(); moves behind "
-        "an observer hook when the UI and engine betting loops are unified",
+    ("poker_game.py", "get_human_action"):
+        "ConsoleObserver's terminal prompt - this is the front-end's own "
+        "output, not stray logging from the engine",
 }
 
 

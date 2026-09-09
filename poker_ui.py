@@ -5,7 +5,7 @@ import time
 import os
 from typing import Optional
 from PIL import Image, ImageTk
-from poker_game import PokerGame, HandEvaluator
+from poker_game import PokerGame, HandEvaluator, GameObserver, GameAborted
 from win_probability import WinProbabilityCalculator
 from config import (
     UI_WINDOW_WIDTH, UI_WINDOW_HEIGHT, UI_BG_COLOR,
@@ -13,7 +13,13 @@ from config import (
     MAX_AI_DELAY, MIN_AI_DELAY, AI_DELAY_INCREMENT
 )
 
-class PokerUI:
+class PokerUI(GameObserver):
+    """Tk front-end. Implements GameObserver so PokerGame runs the hand.
+
+    There is no betting loop here: the engine owns the rules and calls the
+    hooks at the bottom of this class to ask for the human's action and to
+    report what happened.
+    """
     def __init__(self, root):
         self.root = root
         self.root.title("Texas Hold'em Poker")
@@ -329,7 +335,8 @@ class PokerUI:
                 starting_stack=starting_stack,
                 small_blind=5,
                 big_blind=10,
-                bot_types=bot_types
+                bot_types=bot_types,
+                observer=self
             )
             self.game.players[0].is_ai = False
             
@@ -351,7 +358,10 @@ class PokerUI:
                 break
             hand_num += 1
             self.current_hand = hand_num
-            self.play_single_hand()
+            try:
+                self._assert_game().play_hand()
+            except GameAborted:
+                break
             self.root.after(1000)  # Brief pause between hands
     
     def _assert_game(self) -> PokerGame:
@@ -359,279 +369,122 @@ class PokerUI:
         assert self.game is not None, "Game not initialized"
         return self.game
     
-    def play_single_hand(self):
-        """Play a single hand"""
-        game = self._assert_game()
-        game.hand_number += 1
-        # Don't clear history - accumulate across hands
-        self.log_event(f"\n{'='*50}")
+    # ------------------------------------------------------------------
+    # GameObserver hooks - the engine drives the hand and calls these.
+    # ------------------------------------------------------------------
+
+    def on_hand_start(self, game):
+        self.log_event("")
+        self.log_event("=" * 50)
         self.log_event(f"HAND #{game.hand_number}")
-        self.log_event(f"{'='*50}")
+        self.log_event("=" * 50)
         self.update_history_display()
-        
-        # Reset player state
-        for player in game.players:
-            player.reset_for_new_hand()
-        
-        # Post blinds and deal
-        game.post_blinds()
-        
-        # Log blinds
-        small_blind_player = (game.button + 1) % len(game.players)
-        big_blind_player = (game.button + 2) % len(game.players)
-        sb_player = game.players[small_blind_player]
-        bb_player = game.players[big_blind_player]
-        
+
+    def on_blinds(self, game, small_blind_player, big_blind_player):
         self.log_event(f"Player {small_blind_player} posts small blind: ${game.small_blind}")
         self.log_event(f"Player {big_blind_player} posts big blind: ${game.big_blind}")
-        
-        game.deal_hole_cards()
-        game.current_bet = game.big_blind
-        game.community_cards = []
-        
-        self.log_event("=== PRE-FLOP ===")
-        self.update_history_display()
-        self.update_display("Pre-Flop")
-        self.betting_round("Pre-Flop")
-        
-        # Check if only one player remains
-        active_players = [p for p in game.players if not p.is_folded]
-        if len(active_players) == 1:
-            winner_info = game.determine_winner()
-            self._log_winner(winner_info)
-            game.button = (game.button + 1) % len(game.players)
-            game.pot = 0
-            self.update_display("Hand Over")
-            return
-        
-        # Reset for next round
-        for player in game.players:
-            player.total_bet_this_round = 0
-        game.current_bet = 0
-        
-        # Flop
-        deck = game._assert_deck()
-        game.community_cards = deck.deal(3)
-        cards_str = ", ".join(str(card) for card in game.community_cards)
-        self.log_event(f"=== FLOP: {cards_str} ===")
-        self.update_history_display()
-        self.update_display("Flop")
-        time.sleep(float(self.game_delay_var.get()))
-        self.betting_round("Flop")
-        
-        if len([p for p in game.players if not p.is_folded]) == 1:
-            winner_info = game.determine_winner()
-            self._log_winner(winner_info)
-            game.button = (game.button + 1) % len(game.players)
-            game.pot = 0
-            self.update_display("Hand Over")
-            return
-        
-        # Reset for next round
-        for player in game.players:
-            player.total_bet_this_round = 0
-        game.current_bet = 0
-        
-        # Turn
-        deck = game._assert_deck()
-        game.community_cards += deck.deal(1)
-        cards_str = ", ".join(str(card) for card in game.community_cards)
-        self.log_event(f"=== TURN: {cards_str} ===")
-        self.update_history_display()
-        self.update_display("Turn")
-        time.sleep(float(self.game_delay_var.get()))
-        self.betting_round("Turn")
-        
-        if len([p for p in game.players if not p.is_folded]) == 1:
-            winner_info = game.determine_winner()
-            self._log_winner(winner_info)
-            game.button = (game.button + 1) % len(game.players)
-            game.pot = 0
-            self.update_display("Hand Over")
-            return
-        
-        # Reset for next round
-        for player in game.players:
-            player.total_bet_this_round = 0
-        game.current_bet = 0
-        
-        # River
-        deck = game._assert_deck()
-        game.community_cards += deck.deal(1)
-        cards_str = ", ".join(str(card) for card in game.community_cards)
-        self.log_event(f"=== RIVER: {cards_str} ===")
-        self.update_history_display()
-        self.update_display("River")
-        time.sleep(float(self.game_delay_var.get()))
-        self.betting_round("River")
-        
-        # Showdown
-        self._reveal_all_hands()
-        winner_info = game.determine_winner()
-        self._log_winner(winner_info)
-        game.button = (game.button + 1) % len(game.players)
-        game.pot = 0
-        self.update_history_display()
-        self.update_display("Showdown")
-    
-    def betting_round(self, stage):
-        """Execute a betting round"""
-        game = self._assert_game()
-        active_players = game.get_active_players()
-        if len(active_players) <= 1:
-            return
-        
+
+    def on_stage(self, game, stage):
         if stage == "Pre-Flop":
-            first_to_act = (game.button + 3) % len(game.players)
+            self.log_event("=== PRE-FLOP ===")
         else:
-            first_to_act = (game.button + 1) % len(game.players)
-        
-        current_player_idx = first_to_act
-        players_who_acted_this_level = set()
-        
-        while True:
-            player = game.players[current_player_idx]
-            
-            if player.is_folded or player.stack == 0:
-                current_player_idx = (current_player_idx + 1) % len(game.players)
-                continue
-            
-            to_call = game.current_bet - player.total_bet_this_round
-            
-            if player.is_ai:
-                # Enable skip buttons for AI turn
-                self.next_action_button.config(state=tk.NORMAL)
-                self.next_player_button.config(state=tk.NORMAL)
-                
-                # Check if should skip
-                if self.skip_to_player:
-                    # Skip all AI until player's turn
-                    current_player_idx = (current_player_idx + 1) % len(game.players)
-                    continue
-                
-                if to_call == 0:
-                    action = "check"
-                else:
-                    action = game.ai_decision(player, game.community_cards, game.current_bet, to_call)
-                
-                # Add delay so user can see action
-                if not self.skip_next_ai_action:
-                    delay_val = float(self.game_delay_var.get())
-                    time.sleep(delay_val)
-                else:
-                    self.skip_next_ai_action = False
-            else:
-                # Human player - wait for action
-                self.current_player_action = None
-                self.player_action_info = {
-                    "to_call": to_call,
-                    "stack": player.stack,
-                    "pot": game.pot
-                }
-                
-                # Calculate win probability if enabled
-                if self.show_equity_game.get():
-                    try:
-                        # Get count of active opponents
-                        active_opponents = len(game.get_active_opponents(player))
-                        result = self.win_probability_calculator.calculate_win_probability(
-                            player.hole_cards,
-                            game.community_cards,
-                            active_opponents
-                        )
-                        self.player_action_info["win_prob"] = result['win_prob']
-                        self.player_action_info["equity"] = result['equity']
-                    except Exception as e:
-                        print(f"Error calculating win probability: {e}")
-                
-                # Clear skip flags and disable skip buttons - it's player's turn now
-                self.skip_to_player = False
-                self.next_action_button.config(state=tk.DISABLED)
-                self.next_player_button.config(state=tk.DISABLED)
-                
-                # Disable action buttons after AI actions complete
-                self.disable_action_buttons()
-                
-                self.update_action_buttons(to_call)
-                self.setup_raise_controls(to_call, player.stack)
-                self.update_display(f"{stage} - Waiting for your action")
-                
-                # Wait for player action
-                while self.current_player_action is None and self.game_running:
-                    self.root.update()
-                
-                if not self.game_running:
-                    return
-                
-                action = self.current_player_action
-            
-            self.process_action(player, action, stage)
-            
-            # Disable buttons after action is submitted
-            if not player.is_ai:
-                self.disable_action_buttons()
-            
-            players_who_acted_this_level.add(player.player_id)
-            
-            # Check if betting round is complete
-            active_players = game.get_active_players()
-            if len(active_players) <= 1:
-                break
-            
-            active_unfolded = game.get_unfolded_players()
-            if len(active_unfolded) <= 1:
-                break
-            
-            if all(p.player_id in players_who_acted_this_level for p in active_unfolded):
-                all_matched = all(
-                    p.total_bet_this_round == game.current_bet
-                    for p in active_unfolded
-                )
-                if all_matched:
-                    break
-            
-            current_player_idx = (current_player_idx + 1) % len(game.players)
-            self.update_display(stage)
-    
-    def process_action(self, player, action, stage):
-        """Process a player's action"""
-        game = self._assert_game()
-        to_call = game.current_bet - player.total_bet_this_round
-        
-        if action == "fold":
-            player.is_folded = True
-            msg = f"Player {player.player_id} folds"
-            self.log_event(msg)
-            self.message_label.config(text=msg)
-        elif action == "call":
-            if to_call > 0:
-                bet_amount = min(to_call, player.stack)
-                player.stack -= bet_amount
-                player.total_bet_this_round += bet_amount
-                game.pot += bet_amount
-                msg = f"Player {player.player_id} calls ${bet_amount}"
-                self.log_event(msg)
-                self.message_label.config(text=msg)
-                game.current_bet = max(game.current_bet, player.total_bet_this_round)
-        elif action == "raise":
-            raise_amount = self.raise_amount if isinstance(self.raise_amount, int) else game.big_blind
-            bet_amount = min(to_call + raise_amount, player.stack)
-            player.stack -= bet_amount
-            player.total_bet_this_round += bet_amount
-            game.pot += bet_amount
-            game.current_bet = player.total_bet_this_round
-            msg = f"Player {player.player_id} raises to ${player.total_bet_this_round}"
-            self.log_event(msg)
-            self.message_label.config(text=msg)
-        elif action == "check":
-            if to_call == 0:
-                msg = f"Player {player.player_id} checks"
-                self.log_event(msg)
-                self.message_label.config(text=msg)
-        
-        # Update history display after every action
+            cards_str = ", ".join(str(card) for card in game.community_cards)
+            self.log_event(f"=== {stage.upper()}: {cards_str} ===")
         self.update_history_display()
-    
+        self.update_display(stage)
+        if stage != "Pre-Flop":
+            self._delay()
+
+    def before_ai_action(self, game, player, to_call, stage):
+        """Offer the skip buttons; returning False defers this bot."""
+        self.next_action_button.config(state=tk.NORMAL)
+        self.next_player_button.config(state=tk.NORMAL)
+        return not self.skip_to_player
+
+    def get_human_action(self, game, player, to_call, stage):
+        """Block until the player presses a button, then report their action."""
+        self.current_player_action = None
+        self.player_action_info = {
+            "to_call": to_call,
+            "stack": player.stack,
+            "pot": game.pot,
+        }
+
+        if self.show_equity_game.get():
+            try:
+                result = self.win_probability_calculator.calculate_win_probability(
+                    player.hole_cards,
+                    game.community_cards,
+                    len(game.get_active_opponents(player))
+                )
+                self.player_action_info["win_prob"] = result["win_prob"]
+                self.player_action_info["equity"] = result["equity"]
+            except Exception as e:
+                print(f"Error calculating win probability: {e}")
+
+        # It is the human's turn: stop skipping and hand over the controls.
+        self.skip_to_player = False
+        self.next_action_button.config(state=tk.DISABLED)
+        self.next_player_button.config(state=tk.DISABLED)
+        self.disable_action_buttons()
+        self.update_action_buttons(to_call)
+        self.setup_raise_controls(to_call, player.stack)
+        self.update_display(f"{stage} - Waiting for your action")
+
+        while self.current_player_action is None and self.game_running:
+            self.root.update()
+
+        if not self.game_running:
+            raise GameAborted()
+
+        action = self.current_player_action
+        self.disable_action_buttons()
+        return (action, self.raise_amount if action == "raise" else None)
+
+    def on_action(self, game, player, action, amount, stage):
+        if action == "fold":
+            msg = f"Player {player.player_id} folds"
+        elif action == "call":
+            msg = f"Player {player.player_id} calls ${amount}"
+        elif action == "raise":
+            msg = f"Player {player.player_id} raises to ${player.total_bet_this_round}"
+        elif action == "check":
+            msg = f"Player {player.player_id} checks"
+        else:
+            msg = f"Player {player.player_id}: {action}"
+        if player.is_all_in:
+            msg += " (all-in)"
+
+        self.log_event(msg)
+        self.message_label.config(text=msg)
+        self.update_history_display()
+
+        if player.is_ai:
+            if self.skip_next_ai_action:
+                self.skip_next_ai_action = False
+            else:
+                self._delay()
+
+    def on_turn_advanced(self, game, stage):
+        self.update_display(stage)
+
+    def on_showdown(self, game):
+        self._reveal_all_hands()
+
+    def on_hand_end(self, game, winner_info):
+        self._log_winner(winner_info)
+        self.update_history_display()
+        self.update_display("Hand Over")
+
+    def _delay(self):
+        """Pause so the user can follow what just happened."""
+        try:
+            delay = float(self.game_delay_var.get())
+        except (ValueError, tk.TclError):
+            delay = DEFAULT_AI_DELAY
+        if delay > 0:
+            time.sleep(delay)
+
     def player_action(self, action):
         """Handle player action button press"""
         if action in ["check", "call", "fold"]:

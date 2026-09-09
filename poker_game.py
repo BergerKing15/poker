@@ -137,10 +137,75 @@ class Player:
         return f"Player {self.player_id} (Stack: ${self.stack})"
 
 
+class GameAborted(Exception):
+    """Raised by an observer to abandon a hand in progress (e.g. the UI closed)."""
+
+
+class GameObserver:
+    """Hooks a front-end implements so the engine can own the betting rules.
+
+    The engine decides what is legal and moves the money; a front-end supplies
+    human actions and renders what happened. Every hook defaults to a no-op, so
+    headless play and tournaments need nothing. This exists so the Tk UI can
+    drive the same betting loop instead of keeping a parallel copy of it.
+    """
+
+    def on_hand_start(self, game):
+        """A new hand is beginning, before blinds are posted."""
+
+    def on_blinds(self, game, small_blind_player, big_blind_player):
+        """Blinds have been posted."""
+
+    def on_stage(self, game, stage):
+        """A street has been dealt and is about to be bet."""
+
+    def before_ai_action(self, game, player, to_call, stage):
+        """Return False to pass over this bot and come back to it later."""
+        return True
+
+    def get_human_action(self, game, player, to_call, stage):
+        """Return (action, raise_amount) for a seat that is not AI controlled."""
+        return ("fold", None)
+
+    def on_action(self, game, player, action, amount, stage):
+        """An action has been applied.
+
+        `action` is what the engine actually did, which is not always what was
+        requested: an illegal check becomes a call, an unknown action a fold.
+        """
+
+    def on_turn_advanced(self, game, stage):
+        """Action has moved on to the next seat."""
+
+    def on_showdown(self, game):
+        """Remaining hands are about to be compared."""
+
+    def on_hand_end(self, game, winner_info):
+        """The pot has been awarded."""
+
+
+class ConsoleObserver(GameObserver):
+    """Prompts a human at the terminal. The default for a bare PokerGame."""
+
+    def get_human_action(self, game, player, to_call, stage):
+        print()
+        print(f"--- Player {player.player_id} (YOU) ---")
+        print(f"Your cards: {player.hole_cards}")
+        print(f"Your stack: ${player.stack}")
+        print(f"Amount to call: ${to_call}")
+        print(f"Current pot: ${game.pot}")
+
+        if to_call == 0:
+            action = input("Your action (check/raise/fold): ").lower().strip()
+        else:
+            action = input("Your action (call/raise/fold): ").lower().strip()
+        return (action, None)
+
+
 class PokerGame:
     DEBUG = False  # Toggle for print output
     
-    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10, use_bots=True, bot_types=None):
+    def __init__(self, num_players=3, starting_stack=1000, small_blind=5, big_blind=10, use_bots=True, bot_types=None, observer=None):
         self.players = [Player(i, starting_stack) for i in range(num_players)]
         self.small_blind = small_blind
         self.big_blind = big_blind
@@ -153,6 +218,8 @@ class PokerGame:
         self.side_pots: List = []  # List of {amount, eligible_players}
         self.total_bet_by_player = {}  # Track total bet amount per player for side pot calculation
         self.pending_raise_amount = 0  # Temporary storage for bot raise amounts
+        # Front-end hooks; ConsoleObserver keeps the terminal demo working.
+        self.observer = observer if observer is not None else ConsoleObserver()
         
         # Bot system
         self.use_bots = use_bots
@@ -198,6 +265,10 @@ class PokerGame:
     def get_active_opponents(self, excluding_player) -> List:
         """Get active players excluding the specified player"""
         return [p for p in self.get_active_players() if p != excluding_player]
+
+    def get_players_still_acting(self) -> List:
+        """Players who can still act: neither folded nor already all-in."""
+        return [p for p in self.players if not p.is_folded and not p.is_all_in]
 
     def get_unfolded_opponents(self, excluding_player) -> List:
         """Get unfolded players excluding the specified player"""
@@ -370,160 +441,176 @@ class PokerGame:
         else:  # High card
             return "fold" if to_call > 0 else "check"
 
-    def betting_round(self, stage):
-        """Execute a betting round"""
-        if self.DEBUG:
-            print(f"\n--- {stage.upper()} ---")
-            print(f"Pot: ${self.pot}")
-        if self.community_cards and self.DEBUG:
-            print(f"Community Cards: {self.community_cards}")
+    def _request_action(self, player, to_call, stage):
+        """Ask whoever controls this seat what to do.
 
-        active_players = [p for p in self.players if not p.is_folded]
-        if len(active_players) <= 1:
-            return
+        Returns (action, raise_amount). A None action means the observer wants
+        this player passed over for now (the UI's "skip to my turn" button).
+        """
+        if not player.is_ai:
+            return self.observer.get_human_action(self, player, to_call, stage)
 
-        # Determine starting player (left of big blind for pre-flop, after button for others)
-        if stage == "Pre-Flop":
-            first_to_act = (self.button + 3) % len(self.players)
+        if not self.observer.before_ai_action(self, player, to_call, stage):
+            return (None, None)
+
+        if to_call == 0:
+            return ("check", None)
+
+        # ai_decision reports a raise size out of band via pending_raise_amount.
+        self.pending_raise_amount = 0
+        action = self.ai_decision(player, self.community_cards, self.current_bet, to_call)
+        raise_amount = self.pending_raise_amount or None
+        self.pending_raise_amount = 0
+        return (action, raise_amount)
+
+    def _apply_action(self, player, action, raise_amount, to_call, stage):
+        """Move the money for one action and tell the observer what happened.
+
+        Returns (effective_action, action_taken). The effective action is not
+        always the requested one: a check facing a bet is turned into a call,
+        and an unrecognised action into a fold.
+        """
+        action_taken = False
+        amount = 0
+
+        if action == "fold":
+            player.is_folded = True
+            action_taken = True
+
+        elif action == "call":
+            if to_call > 0:
+                amount = min(to_call, player.stack)
+                player.stack -= amount
+                player.total_bet_this_round += amount
+                self.pot += amount
+                action_taken = True
+                self.current_bet = max(self.current_bet, player.total_bet_this_round)
+
+        elif action == "raise":
+            increment = raise_amount if raise_amount else self.big_blind
+            amount = min(to_call + increment, player.stack)
+            player.stack -= amount
+            player.total_bet_this_round += amount
+            self.pot += amount
+            self.current_bet = player.total_bet_this_round
+            action_taken = True
+
+        elif action == "check":
+            if to_call == 0:
+                action_taken = True
+            else:
+                # Not a legal check - the player must call or fold, so call.
+                action = "call"
+                amount = min(to_call, player.stack)
+                if amount > 0:
+                    player.stack -= amount
+                    player.total_bet_this_round += amount
+                    self.pot += amount
+                    action_taken = True
+                self.current_bet = max(self.current_bet, player.total_bet_this_round)
+
         else:
-            first_to_act = (self.button + 1) % len(self.players)
+            if self.DEBUG:
+                print(f"Player {player.player_id} returned unexpected action "
+                      f"{action!r}, forcing fold")
+            action = "fold"
+            player.is_folded = True
+            action_taken = True
 
-        current_player_idx = first_to_act
+        # A player with nothing behind is all-in, however they got there.
+        # Without this they keep being asked to act and can never match the
+        # current bet, which is what the UI's `stack == 0` skip papered over.
+        if player.stack == 0 and not player.is_folded:
+            player.is_all_in = True
+
+        if self.DEBUG and action_taken:
+            if action == "fold":
+                print(f"Player {player.player_id} folds")
+            elif action == "check":
+                print(f"Player {player.player_id} checks")
+            elif player.is_all_in:
+                print(f"Player {player.player_id} goes all-in with ${amount}")
+            elif action == "raise":
+                print(f"Player {player.player_id} raises to ${player.total_bet_this_round}")
+            else:
+                print(f"Player {player.player_id} calls ${amount}")
+
+        self.observer.on_action(self, player, action, amount, stage)
+        return action, action_taken
+
+    def betting_round(self, stage):
+        """Execute a betting round.
+
+        This is the only betting implementation in the project. The Tk UI runs
+        the same loop through its observer instead of keeping a parallel copy,
+        so the rules cannot drift between the GUI and headless play.
+        """
+        if self.DEBUG:
+            print(f"--- {stage.upper()} ---")
+            print(f"Pot: ${self.pot}")
+            if self.community_cards:
+                print(f"Community Cards: {self.community_cards}")
+
+        if len(self.get_unfolded_players()) <= 1:
+            return
+        if not self.get_players_still_acting():
+            return  # everyone left is all-in; there is nothing to bet
+
+        if stage == "Pre-Flop":
+            current_player_idx = (self.button + 3) % len(self.players)
+        else:
+            current_player_idx = (self.button + 1) % len(self.players)
+
         players_who_acted_this_level = set()
-        max_iterations = len(self.players) * 100  # Upper limit for safety
+        max_iterations = len(self.players) * 100
         iteration_count = 0
-        
+
         while True:
             iteration_count += 1
             if iteration_count > max_iterations:
                 if self.DEBUG:
-                    print(f"WARNING: Betting round exceeded {max_iterations} iterations, forcing termination")
+                    print(f"WARNING: Betting round exceeded {max_iterations} "
+                          f"iterations, forcing termination")
                 break
-            
+
             player = self.players[current_player_idx]
 
             if player.is_folded or player.is_all_in:
                 current_player_idx = (current_player_idx + 1) % len(self.players)
-                continue  # Skip and continue without counting as progress
+                continue
 
             to_call = self.current_bet - player.total_bet_this_round
+            action, raise_amount = self._request_action(player, to_call, stage)
 
-            if player.is_ai:
-                if to_call == 0:
-                    action = "check"
-                else:
-                    action = self.ai_decision(player, self.community_cards, self.current_bet, to_call)
-            else:
-                # Human player - always prompt
-                print(f"\n--- Player {player.player_id} (YOU) ---")
-                print(f"Your cards: {player.hole_cards}")
-                print(f"Your stack: ${player.stack}")
-                print(f"Amount to call: ${to_call}")
-                print(f"Current pot: ${self.pot}" )
-                if self.DEBUG:
-                    pass  # Human prompts always show for interaction
-                
-                if to_call == 0:
-                    action = input("Your action (check/raise/fold): ").lower().strip()
-                else:
-                    action = input("Your action (call/raise/fold): ").lower().strip()
+            if action is None:
+                current_player_idx = (current_player_idx + 1) % len(self.players)
+                continue
 
-            action_taken = False  # Track if action actually changed state
-            
-            if action == "fold":
-                player.is_folded = True
-                action_taken = True
-                iterations_without_progress = 0
-                if self.DEBUG:
-                    print(f"Player {player.player_id} folds")
-            elif action == "call":
-                if to_call > 0:
-                    bet_amount = min(to_call, player.stack)
-                    player.stack -= bet_amount
-                    player.total_bet_this_round += bet_amount
-                    self.pot += bet_amount
-                    action_taken = True
-                    iterations_without_progress = 0
-                    if bet_amount == to_call and player.stack == 0:
-                        player.is_all_in = True
-                        if self.DEBUG:
-                            print(f"Player {player.player_id} goes all-in with ${bet_amount}")
-                    elif self.DEBUG:
-                        print(f"Player {player.player_id} calls ${bet_amount}")
-                    self.current_bet = max(self.current_bet, player.total_bet_this_round)
-            elif action == "raise":
-                if player.is_ai:
-                    # Use pending raise amount from bot if available
-                    raise_amount = getattr(self, 'pending_raise_amount', self.big_blind)
-                    self.pending_raise_amount = 0  # Clear it
-                else:
-                    # Ask human player how much to raise (this should be handled by UI)
-                    max_raise = player.stack - to_call
-                    raise_amount = min(self.big_blind, max_raise)
-                
-                bet_amount = min(to_call + raise_amount, player.stack)
-                player.stack -= bet_amount
-                player.total_bet_this_round += bet_amount
-                self.pot += bet_amount
-                self.current_bet = player.total_bet_this_round
-                action_taken = True
-                iterations_without_progress = 0
-                if player.stack == 0:
-                    player.is_all_in = True
-                    if self.DEBUG:
-                        print(f"Player {player.player_id} goes all-in with raise to ${player.total_bet_this_round}")
-                elif self.DEBUG:
-                    print(f"Player {player.player_id} raises to ${player.total_bet_this_round}")
-                players_who_acted_this_level = {player.player_id}  # Reset who has acted
-            elif action == "check":
-                if to_call == 0:
-                    action_taken = True
-                    iterations_without_progress = 0
-                    if self.DEBUG:
-                        print(f"Player {player.player_id} checks")
-                else:
-                    # Invalid action - player must call or fold, force call
-                    if self.DEBUG:
-                        print(f"Player {player.player_id} attempted check but to_call=${to_call}, forcing call")
-                    bet_amount = min(to_call, player.stack)
-                    if bet_amount > 0:
-                        player.stack -= bet_amount
-                        player.total_bet_this_round += bet_amount
-                        self.pot += bet_amount
-                        action_taken = True
-                        iterations_without_progress = 0
-                    if player.stack == 0:
-                        player.is_all_in = True
-            else:
-                # Unexpected action, force fold
-                if self.DEBUG:
-                    print(f"Player {player.player_id} returned unexpected action '{action}', forcing fold")
-                player.is_folded = True
-                action_taken = True
-                iterations_without_progress = 0
+            effective, action_taken = self._apply_action(
+                player, action, raise_amount, to_call, stage
+            )
 
+            if effective == "raise":
+                # A raise reopens the action for everyone behind.
+                players_who_acted_this_level = set()
             if action_taken:
                 players_who_acted_this_level.add(player.player_id)
-            
-            # Check if betting round is complete
-            active_players = [p for p in self.players if not p.is_folded]
-            if len(active_players) <= 1:
+
+            if len(self.get_unfolded_players()) <= 1:
                 break
-            
-            # Check if all non-folded, non-all-in players have acted
-            players_still_acting = [p for p in self.players if not p.is_folded and not p.is_all_in]
+
+            players_still_acting = self.get_players_still_acting()
             if len(players_still_acting) <= 1:
                 break
-                
-            if all(p.player_id in players_who_acted_this_level for p in players_still_acting):
-                all_matched = all(
-                    p.total_bet_this_round == self.current_bet 
-                    for p in players_still_acting
-                )
-                if all_matched:
+
+            if all(p.player_id in players_who_acted_this_level
+                   for p in players_still_acting):
+                if all(p.total_bet_this_round == self.current_bet
+                       for p in players_still_acting):
                     break
-            
+
             current_player_idx = (current_player_idx + 1) % len(self.players)
+            self.observer.on_turn_advanced(self, stage)
 
     def reset_round_bets(self):
         """Reset player bets for next betting round"""
@@ -597,7 +684,10 @@ class PokerGame:
                 split_amount = pot_amount // len(pot_winners)
                 remainder = pot_amount % len(pot_winners)
                 for i, winner in enumerate(pot_winners):
-                    amount = split_amount + (1 if i == 0 else 0)
+                    # Odd chips go to the first `remainder` winners, not
+                    # unconditionally to the first - that minted a chip
+                    # every time a split pot divided evenly.
+                    amount = split_amount + (1 if i < remainder else 0)
                     winner.stack += amount
                     total_distributed += amount
                     if self.DEBUG and len(pots) > 1:
@@ -608,24 +698,30 @@ class PokerGame:
         
         return {"winners": [], "pot": self.pot, "hand_type": "Showdown with side pots"}
 
+    # (street name, cards dealt before that street's betting)
+    STREETS = (("Pre-Flop", 0), ("Flop", 3), ("Turn", 1), ("River", 1))
+
     def play_hand(self):
-        """Play a single hand of poker"""
+        """Play a single hand of poker and return the winner info."""
         self.hand_number += 1
         if self.DEBUG:
-            print(f"\n{'='*50}")
+            print("=" * 50)
             print(f"HAND #{self.hand_number}")
-            print(f"{'='*50}")
+            print("=" * 50)
 
-        # Reset player state
         for player in self.players:
             player.reset_for_new_hand()
-        
-        # Reset side pots
+
         self.side_pots = []
         self.total_bet_by_player = {p.player_id: 0 for p in self.players}
 
-        # Post blinds and deal
+        self.observer.on_hand_start(self)
+
         self.post_blinds()
+        self.observer.on_blinds(self,
+                                (self.button + 1) % len(self.players),
+                                (self.button + 2) % len(self.players))
+
         self.deal_hole_cards()
         self.current_bet = self.big_blind
         self.community_cards = []
@@ -634,71 +730,31 @@ class PokerGame:
             for player in self.players:
                 print(f"Player {player.player_id}: {player.hole_cards}")
 
-        # Pre-flop betting
-        self.betting_round("Pre-Flop")
+        for stage, cards_to_deal in self.STREETS:
+            if cards_to_deal:
+                self.reset_round_bets()
+                deck = self._assert_deck()
+                dealt = deck.deal(cards_to_deal)
+                # The flop replaces the (empty) board, later streets extend it.
+                self.community_cards = (dealt if stage == "Flop"
+                                        else self.community_cards + dealt)
 
-        # Check if only one player remains or if only one player is not all-in
-        active_players = [p for p in self.players if not p.is_folded]
-        players_still_playing = [p for p in active_players if not p.is_all_in]
-        if len(active_players) == 1 or len(players_still_playing) == 0:
-            # If all players are all-in or folded, continue to river and show down
-            if len(active_players) <= 1:
-                self.determine_winner()
-                self.button = (self.button + 1) % len(self.players)
-                self.pot = 0
-                return
-            # Else continue to river with all-in players
+            self.observer.on_stage(self, stage)
+            self.betting_round(stage)
 
-        # Reset for next round
-        self.reset_round_bets()
+            if len(self.get_unfolded_players()) <= 1:
+                return self._finish_hand()
 
-        # Flop
-        deck = self._assert_deck()
-        self.community_cards = deck.deal(3)
-        self.betting_round("Flop")
+        self.observer.on_showdown(self)
+        return self._finish_hand()
 
-        active_players = [p for p in self.players if not p.is_folded]
-        players_still_playing = [p for p in active_players if not p.is_all_in]
-        if len(active_players) == 1:
-            self.determine_winner()
-            self.button = (self.button + 1) % len(self.players)
-            self.pot = 0
-            return
-        if len(players_still_playing) == 0:
-            # All remaining players are all-in, continue to river
-            pass
-
-        # Reset for next round
-        self.reset_round_bets()
-
-        # Turn
-        deck = self._assert_deck()
-        self.community_cards += deck.deal(1)
-        self.betting_round("Turn")
-
-        active_players = [p for p in self.players if not p.is_folded]
-        players_still_playing = [p for p in active_players if not p.is_all_in]
-        if len(active_players) == 1:
-            self.determine_winner()
-            self.button = (self.button + 1) % len(self.players)
-            self.pot = 0
-            return
-        if len(players_still_playing) == 0:
-            # All remaining players are all-in, continue to river
-            pass
-
-        # Reset for next round
-        self.reset_round_bets()
-
-        # River
-        deck = self._assert_deck()
-        self.community_cards += deck.deal(1)
-        self.betting_round("River")
-
-        # Showdown
-        self.determine_winner()
+    def _finish_hand(self):
+        """Award the pot, move the button and clear the table."""
+        winner_info = self.determine_winner()
+        self.observer.on_hand_end(self, winner_info)
         self.button = (self.button + 1) % len(self.players)
         self.pot = 0
+        return winner_info
 
     def print_stacks(self):
         """Print current player stacks"""

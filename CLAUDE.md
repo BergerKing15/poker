@@ -48,13 +48,24 @@ lands mid-run and looks like a test failure.
 Docs in [docs/](docs/) are design notes written alongside features; they lag the code, so
 trust the source when they disagree.
 
-### Two independent hand loops
+### One hand loop, driven through hooks
 
-`PokerGame.play_hand()`/`betting_round()` drive headless play (tests, tournaments), and
-`PokerUI.play_single_hand()`/`PokerUI.betting_round()` are a *separate reimplementation*
-for the GUI (it needs to interleave logging, display updates, and blocking on the human).
-A change to betting/street logic almost always has to be made in both places, or the GUI
-and the tournament results silently diverge.
+`PokerGame.play_hand()` / `betting_round()` is the only betting implementation.
+A front-end supplies a `GameObserver` (`poker_game.py`) and the engine calls its hooks:
+`on_hand_start`, `on_blinds`, `on_stage`, `before_ai_action`, `get_human_action`,
+`on_action`, `on_turn_advanced`, `on_showdown`, `on_hand_end`. Every hook defaults to a
+no-op, so tournaments and tests pass no observer at all; a bare `PokerGame` gets
+`ConsoleObserver`, which keeps the terminal demo in `__main__` working.
+
+`PokerUI` subclasses `GameObserver` and passes `observer=self`, so the GUI has no betting
+loop of its own — it renders `on_action` and blocks in `get_human_action` until a button
+is pressed. Two things worth knowing when writing an observer:
+
+- **A misspelled hook silently becomes a no-op**, since the base class defines them all.
+  There is a test that asserts `PokerUI` overrides every hook — extend it if you add one.
+- `get_human_action` returns `(action, raise_amount)` and may raise `GameAborted` to
+  abandon the hand (the UI does this when its window closes). `before_ai_action` returning
+  `False` defers that bot to a later pass, which is how "skip to my turn" works.
 
 ### How a bot gets consulted
 
@@ -97,6 +108,12 @@ to see the swallowed error, or call `decide_action` directly.
   `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
   `test_bot_ai.test_hand_range_notation` enforces this across every range constant it can
   find, so a low-card-first typo now fails the suite instead of quietly shrinking a range.
+- The raise amount an observer returns is an **increment on top of the call**, not a
+  "raise to" total: the engine spends `min(to_call + raise_amount, stack)`. The UI's raise
+  slider is populated with absolute-looking values (`current_bet` up to the stack) and
+  then passed through as that increment, so the minimum slider position raises by roughly
+  the current bet. Pre-existing behaviour, preserved through the refactor — fix the slider
+  or the semantics deliberately, not by accident.
 - `all_tests.py` imports each suite and calls its `test_*` functions directly, because
   the suites invoke their tests from a `__main__` block — plain `import` runs nothing.
   Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so its
@@ -113,17 +130,7 @@ Agreed but not finished, roughly in the order it should be tackled. The refactor
 listed before the data work on purpose — building a data layer on top of the duplicated
 betting loop means migrating it twice.
 
-**1. Unify the two betting loops.** The duplication described under **Architecture** is
-the main structural debt. Plan: make `PokerGame.betting_round`/`play_hand` the single
-implementation, parameterised by hooks a front-end supplies — an action provider for
-human turns, plus event callbacks for logging/display/delay — then delete
-`PokerUI.betting_round` and `PokerUI.play_single_hand`. `MockPokerGame` only overrides
-`betting_round(stage)` and calls `super()`, so it survives a hook-based refactor.
-Watch for behaviour the GUI copy currently gets wrong: it never sets `is_all_in`, skips
-on `stack == 0` instead, has no max-iteration guard, and doesn't force a call when a
-player checks facing a bet.
-
-**2. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
+**1. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
 200-hand Monte Carlo: **~78 ms per call**, which is why an exhaustive sweep over the 5 AI
 bots takes ~26 minutes while the 12 simple bots finish in under a second. Preflop is only
 169 canonical hands × 1-9 opponents = **1,521 rows** - precompute once, ship as JSON, load
@@ -132,13 +139,13 @@ at import. Postflop can't be enumerated (~29M flop combinations), so memoise at 
 per situation where they currently jitter, so cached results aren't directly comparable
 to existing tournament numbers.
 
-**3. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
+**2. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
 data" but `save_results` writes only aggregates — win rate, total gain, final stacks — and
 overwrites the same file every run (the committed `tournament_results.json` is a single
 50-hand game). Per-hand rows (hand id, bot type, position, hole cards, board, action
 sequence, pot, net result) are tabular, append-only and query-shaped; `sqlite3` is stdlib,
 so no new dependency. This is for accumulating and querying history across runs — it does
-**not** avoid re-running simulations, which is what item 2 is for.
+**not** avoid re-running simulations, which is what item 1 is for.
 
 
 ## Conventions
