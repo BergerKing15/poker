@@ -115,11 +115,11 @@ The game will open a configuration window where you can:
 
 ### Testing & Documentation
 - **all_tests.py**: Master test runner - runs all test suites at once
-- **game_test_suite.py**: Comprehensive game logic tests (92 assertions)
+- **game_test_suite.py**: Comprehensive game logic tests (91 assertions)
 - **win_probability_test_suite.py**: Win probability calculator tests
 - **test_bot_ai.py**: Bot AI decision tests
-- **BOT_AI_GUIDE.md**: Comprehensive AI documentation
-- **BOT_QUICK_REFERENCE.md**: Quick reference guide
+- **docs/BOT_AI_GUIDE.md**: Comprehensive AI documentation
+- **docs/BOT_QUICK_REFERENCE.md**: Quick reference guide
 
 #### Running Tests
 ```bash
@@ -144,11 +144,15 @@ python test_bot_ai.py
 ### Test Suite Performance
 ```
 $ python all_tests.py
-All tests passed in 0.05 seconds
-✓ Game Logic (92 assertions)
-✓ Win Probability (51 assertions)  
-✓ Bot AI (25+ assertions)
+PASSED   | Game Logic Tests                         91 assertions
+PASSED   | Win Probability Calculator Tests         44 assertions
+PASSED   | Bot AI Decision Tests                    0 assertions
+Assertions: 135 passed, 0 failed
 ```
+Runtime is roughly 1-2 minutes, nearly all of it the win probability suite's
+Monte Carlo simulations. The Bot AI suite is demonstration output plus a
+starting-range check that raises on failure, so it contributes no counted
+assertions.
 
 ### Memory Usage
 - **Base Application**: ~15-20 MB
@@ -254,7 +258,7 @@ NUM_SIMULATIONS_SETUP = 5000  # Win probability calculations
 
 ## Code Quality
 
-- **92 Test Assertions**: Comprehensive test coverage across 3 test suites
+- **135 Test Assertions**: Comprehensive test coverage across 3 test suites
 - **Type Hints**: Full Optional[] type annotations throughout
 - **Helper Methods**: Clean abstractions for common operations
 - **Debug Flags**: Consistent debug output management
@@ -334,7 +338,7 @@ This poker game implementation is provided as-is for educational purposes. The p
 ### Workflow Details (`.github/workflows/tests.yml`)
 
 **Test Matrix:**
-- **Python Versions**: 3.8, 3.9, 3.10, 3.11, 3.12
+- **Python Versions**: 3.11, 3.12
 - **OS**: Ubuntu (with headless Tkinter via Xvfb)
 - **Trigger**: Pushes to `main`/`develop`, all pull requests
 
@@ -344,10 +348,10 @@ This poker game implementation is provided as-is for educational purposes. The p
    - Runs: `python -m py_compile poker_game.py poker_ui.py ...`
 
 2. **Comprehensive Testing**
-   - Game logic tests (92 assertions)
-   - Win probability calculations
+   - Game logic tests (91 assertions)
+   - Win probability calculations (44 assertions)
    - Bot AI decision making
-   - Runs: `python all_tests.py` (completes in ~50ms)
+   - Runs: `python all_tests.py` (135 assertions, ~1-2 minutes)
 
 3. **Code Quality Checks**
    - Verifies import chain integrity
@@ -363,7 +367,7 @@ This poker game implementation is provided as-is for educational purposes. The p
 
 **Quick Local Testing**:
 ```bash
-python all_tests.py              # Run all 92 assertions (~50ms)
+python all_tests.py              # Run all 135 assertions (~1-2 min)
 python game_test_suite.py        # Game logic tests
 python win_probability_test_suite.py  # Equity calculator
 python test_bot_ai.py            # Bot AI validation
