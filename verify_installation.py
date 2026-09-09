@@ -3,6 +3,8 @@
 Verification script for Poker Bot AI installation
 """
 
+import sys
+
 def check_imports():
     """Check all required imports"""
     print("Checking imports...", end=" ")
@@ -117,8 +119,8 @@ def check_files():
         "win_probability.py",
         "poker_ui.py",
         "game_test_suite.py",
-        "BOT_AI_GUIDE.md",
-        "BOT_QUICK_REFERENCE.md",
+        "docs/BOT_AI_GUIDE.md",
+        "docs/BOT_QUICK_REFERENCE.md",
     ]
     
     missing = [f for f in required if not os.path.exists(f)]
@@ -163,10 +165,11 @@ if __name__ == "__main__":
         print("  python test_bot_ai.py       # Test AI system")
         print("  python game_test_suite.py   # Run all tests")
         print("\nDocumentation:")
-        print("  BOT_AI_GUIDE.md             # Comprehensive guide")
-        print("  BOT_QUICK_REFERENCE.md      # Quick reference")
+        print("  docs/BOT_AI_GUIDE.md        # Comprehensive guide")
+        print("  docs/BOT_QUICK_REFERENCE.md # Quick reference")
     else:
         print(f"✗ SOME CHECKS FAILED ({passed}/{total})")
         print("=" * 60)
     
     print()
+    sys.exit(0 if all(results) else 1)

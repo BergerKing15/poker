@@ -556,13 +556,14 @@ class SimpleBotBottom50Percent:
     """Only plays bottom 50% of hands (worst hands)"""
     
     BOTTOM_50_PERCENT = {
-        '72o', '73o', '74o', '75o', '76o', '77', '78o', '79o', '7T', '7Jo',
-        '82o', '83o', '84o', '85o', '86o', '87o', '88', '89o', '8T', '8Jo', '8Qo',
-        '92o', '93o', '94o', '95o', '96o', '97o', '98o', '99', '9T', '9Jo', '9Qo', '9Ko',
-        'T2o', 'T3o', 'T4o', 'T5o', 'T6o', 'T7o', 'T8o', 'T9o', 'TT', 'TJo', 'TQo',
-        'J2o', 'J3o', 'J4o', 'J5o', 'J6o', 'J7o', 'J8o', 'J9o', 'JT', 'JJ',
-        'Q2o', 'Q3o', 'Q4o', 'Q5o', 'Q6o', 'Q7o', 'Q8o', 'Q9o',
-        'K2o', 'K3o', 'K4o', 'K5o', 'K6o', 'K7o', 'K8o',
+        # Canonical high-card-first keys, matching hand_key() output.
+        '72o', '73o', '74o', '75o', '76o', '77',
+        '82o', '83o', '84o', '85o', '86o', '87o', '88',
+        '92o', '93o', '94o', '95o', '96o', '97o', '98o', '99',
+        'T2o', 'T3o', 'T4o', 'T5o', 'T6o', 'T7o', 'T8o', 'T9o', 'TT',
+        'J2o', 'J3o', 'J4o', 'J5o', 'J6o', 'J7o', 'J8o', 'J9o', 'JTo', 'JJ',
+        'Q2o', 'Q3o', 'Q4o', 'Q5o', 'Q6o', 'Q7o', 'Q8o', 'Q9o', 'QTo',
+        'K2o', 'K3o', 'K4o', 'K5o', 'K6o', 'K7o', 'K8o', 'K9o',
         'A2o', 'A3o', 'A4o', 'A5o', 'A6o', 'A7o',
     }
     

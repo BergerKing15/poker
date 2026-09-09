@@ -2,8 +2,11 @@
 Test script demonstrating the poker bot AI system
 """
 
+import itertools
+
+import poker_bot
 from poker_game import PokerGame, Card
-from poker_bot import PokerBot
+from poker_bot import PokerBot, hand_key
 
 def test_bot_types():
     """Display and test different bot types"""
@@ -141,6 +144,43 @@ def test_different_positions():
         print(f"         Decision: {'FOLD' if adjusted < fold_threshold else 'CONSIDER'}")
 
 
+def test_hand_range_notation():
+    """Every hand in a bot's starting range must be reachable from real cards.
+
+    The range constants are written by hand in "T"-style notation while
+    Card.RANKS spells ten as "10", so a typo or a low-card-first entry silently
+    becomes a hand the bot can never be dealt.
+    """
+    print()
+    print()
+    print("7. Bot Starting-Range Notation:")
+    print("-" * 70)
+
+    deck = [Card(suit, rank) for suit in Card.SUITS for rank in Card.RANKS]
+    pairs = list(itertools.combinations(deck, 2))
+    reachable = {hand_key(p) for p in pairs} | {hand_key(p, True) for p in pairs}
+
+    unreachable = {}
+    for cls_name in dir(poker_bot):
+        cls = getattr(poker_bot, cls_name)
+        if not isinstance(cls, type):
+            continue
+        for attr in vars(cls):
+            value = getattr(cls, attr)
+            if not (isinstance(value, (set, frozenset)) and value
+                    and all(isinstance(h, str) for h in value)):
+                continue
+            dead = sorted(h for h in value if h not in reachable)
+            if dead:
+                unreachable[f"{cls_name}.{attr}"] = dead
+            print(f"  {cls_name}.{attr:20} {len(value):3} hands  "
+                  f"{'OK' if not dead else 'UNREACHABLE: ' + ', '.join(dead)}")
+
+    assert not unreachable, f"Unreachable hands in starting ranges: {unreachable}"
+    print()
+    print("  All starting-range entries are reachable.")
+
+
 if __name__ == "__main__":
     test_bot_types()
     test_preflop_decisions()
@@ -148,6 +188,7 @@ if __name__ == "__main__":
     test_game_with_bots()
     test_bot_decision()
     test_different_positions()
+    test_hand_range_notation()
     
     print("\n\n" + "=" * 70)
     print("TEST COMPLETE")

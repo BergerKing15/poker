@@ -93,12 +93,11 @@ to see the swallowed error, or call `decide_action` directly.
 - `run_simple_tournament.py` and `run_large_tournament.py` start with a hardcoded
   `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — harmless but dead on this
   machine; they only work when run from the repo root.
-- `SimpleBotBottom50Percent.BOTTOM_50_PERCENT` has 15 entries written low-card-first
-  (`'78o'`, `'9Ko'`, `'JT'`, `'TQo'` …) that no `hand_key()` output can ever match, since
-  keys are always high-card-first. Eleven are harmless duplicates of an entry already in
-  the range, but four — `K9o`, `JTo` (twice), `QTo` — are genuine holes in the bot's
-  stated range. Left as-is deliberately: correcting them changes that bot's strategy and
-  so its tournament numbers. Decide before touching it.
+- Starting-range constants (`TOP_10_PERCENT`, `BOTTOM_50_PERCENT`, `PREMIUM_HANDS`,
+  `EARLY_HANDS`/`LATE_HANDS`) must be written in the same high-card-first notation
+  `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
+  `test_bot_ai.test_hand_range_notation` enforces this across every range constant it can
+  find, so a low-card-first typo now fails the suite instead of quietly shrinking a range.
 - `all_tests.py` "runs" suites by *importing* them (the tests execute at module import).
   A suite that is already imported in the same process is a no-op, and a suite that
   passes without asserting anything still reports PASSED.
@@ -119,10 +118,7 @@ source (e.g. a shared `enable_utf8_output()` calling `sys.stdout.reconfigure`) s
 
 **2. CI workflow.** Correct the dead constructor signatures listed under **Known traps**,
 fix `Card('Spades', 'T')` in the performance step (invalid rank — must be `'10'`), and
-drop the `|| echo "✓ … completed"` guards that turn failures green. Also note
-`verify_installation.py` is a CI step but **always exits 0**, and its `check_files` list
-still expects `BOT_AI_GUIDE.md` / `BOT_QUICK_REFERENCE.md` at the repo root though both
-now live in `docs/` — so it reports "SOME CHECKS FAILED (5/6)" while CI goes green.
+drop the `|| echo "✓ … completed"` guards that turn failures green.
 
 **3. Unify the two betting loops.** The duplication described under **Architecture** is
 the main structural debt. Plan: make `PokerGame.betting_round`/`play_hand` the single
