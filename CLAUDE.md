@@ -13,6 +13,7 @@ python bot_tourney.py         # full headless bot tournament -> tournament_resul
 python bot_tourney.py --fast  # same, but every AI bot is swapped for "Random" (seconds, not minutes)
 python bot_tourney.py --ui    # tournament with the analytics dashboard
 python verify_installation.py # smoke check: imports, bot types, game creation
+python check_prints.py        # fail if an engine module prints outside a DEBUG guard
 python all_tests.py           # all 3 suites, 135 assertions (~75-140s)
 ```
 
@@ -84,12 +85,10 @@ to see the swallowed error, or call `decide_action` directly.
   `'T9o'`) uses `'T'`. Go through `poker_bot.hand_key()` / `RANK_VALUES`, which accept
   both and fold `'10'` → `'T'`; don't hand-roll another rank map. This previously raised
   `KeyError: '10'` on any ten, silently swallowed by the fallback above.
-- **`.github/workflows/tests.yml` contains constructor calls that no longer match the
-  code** — `PokerBot('TAG', tightness=…, aggression=…)` (the real signature is
-  `PokerBot(player_id, bot_type)`), `SimpleBotTop10Percent()` with no `player_id`, and
-  `bot_types={'Player 1': <bot instance>}` (keys must be ints, values type strings).
-  Several test steps also swallow failures with `|| echo "✓ … completed"`. Treat a green
-  badge as weak evidence; run the suites locally.
+- CI has no failure-swallowing left (`|| echo "… completed"` guards are gone) and every
+  step propagates its exit code, so a red badge now means something. `python
+  check_prints.py` enforces the print-behind-DEBUG convention with an AST walk and a
+  documented allowlist — plain grep matched the `__main__` demos and warned on every run.
 - `run_simple_tournament.py` and `run_large_tournament.py` start with a hardcoded
   `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — harmless but dead on this
   machine; they only work when run from the repo root.
@@ -114,11 +113,7 @@ Agreed but not finished, roughly in the order it should be tackled. The refactor
 listed before the data work on purpose — building a data layer on top of the duplicated
 betting loop means migrating it twice.
 
-**1. CI workflow.** Correct the dead constructor signatures listed under **Known traps**,
-fix `Card('Spades', 'T')` in the performance step (invalid rank — must be `'10'`), and
-drop the `|| echo "✓ … completed"` guards that turn failures green.
-
-**2. Unify the two betting loops.** The duplication described under **Architecture** is
+**1. Unify the two betting loops.** The duplication described under **Architecture** is
 the main structural debt. Plan: make `PokerGame.betting_round`/`play_hand` the single
 implementation, parameterised by hooks a front-end supplies — an action provider for
 human turns, plus event callbacks for logging/display/delay — then delete
@@ -128,7 +123,7 @@ Watch for behaviour the GUI copy currently gets wrong: it never sets `is_all_in`
 on `stack == 0` instead, has no max-iteration guard, and doesn't force a call when a
 player checks facing a bet.
 
-**3. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
+**2. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
 200-hand Monte Carlo: **~78 ms per call**, which is why an exhaustive sweep over the 5 AI
 bots takes ~26 minutes while the 12 simple bots finish in under a second. Preflop is only
 169 canonical hands × 1-9 opponents = **1,521 rows** - precompute once, ship as JSON, load
@@ -137,13 +132,13 @@ at import. Postflop can't be enumerated (~29M flop combinations), so memoise at 
 per situation where they currently jitter, so cached results aren't directly comparable
 to existing tournament numbers.
 
-**4. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
+**3. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
 data" but `save_results` writes only aggregates — win rate, total gain, final stacks — and
 overwrites the same file every run (the committed `tournament_results.json` is a single
 50-hand game). Per-hand rows (hand id, bot type, position, hole cards, board, action
 sequence, pot, net result) are tabular, append-only and query-shaped; `sqlite3` is stdlib,
 so no new dependency. This is for accumulating and querying history across runs — it does
-**not** avoid re-running simulations, which is what item 3 is for.
+**not** avoid re-running simulations, which is what item 2 is for.
 
 
 ## Conventions
