@@ -79,11 +79,11 @@ to see the swallowed error, or call `decide_action` directly.
 
 ## Known traps
 
-- **Ranks are `'10'`, not `'T'`.** `Card.RANKS` uses the two-character `'10'`. The
-  `_get_hand_key` helpers duplicated across the `SimpleBot*` classes use a `rank_order`
-  dict keyed on `'T'`, so any hole card that is a ten raises `KeyError: '10'` — swallowed
-  by the fallback above. Fix the maps (or the card representation) rather than working
-  around it; the same map is copy-pasted in several bot classes.
+- **Ranks are `'10'`, not `'T'`.** `Card.RANKS` spells ten as the two-character `'10'`,
+  but starting-hand notation (and every `SimpleBot*` range constant — `'TT'`, `'AT'`,
+  `'T9o'`) uses `'T'`. Go through `poker_bot.hand_key()` / `RANK_VALUES`, which accept
+  both and fold `'10'` → `'T'`; don't hand-roll another rank map. This previously raised
+  `KeyError: '10'` on any ten, silently swallowed by the fallback above.
 - **`.github/workflows/tests.yml` contains constructor calls that no longer match the
   code** — `PokerBot('TAG', tightness=…, aggression=…)` (the real signature is
   `PokerBot(player_id, bot_type)`), `SimpleBotTop10Percent()` with no `player_id`, and
@@ -93,11 +93,64 @@ to see the swallowed error, or call `decide_action` directly.
 - `run_simple_tournament.py` and `run_large_tournament.py` start with a hardcoded
   `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — harmless but dead on this
   machine; they only work when run from the repo root.
+- `SimpleBotBottom50Percent.BOTTOM_50_PERCENT` has 15 entries written low-card-first
+  (`'78o'`, `'9Ko'`, `'JT'`, `'TQo'` …) that no `hand_key()` output can ever match, since
+  keys are always high-card-first. Eleven are harmless duplicates of an entry already in
+  the range, but four — `K9o`, `JTo` (twice), `QTo` — are genuine holes in the bot's
+  stated range. Left as-is deliberately: correcting them changes that bot's strategy and
+  so its tournament numbers. Decide before touching it.
 - `all_tests.py` "runs" suites by *importing* them (the tests execute at module import).
   A suite that is already imported in the same process is a no-op, and a suite that
   passes without asserting anything still reports PASSED.
-- `poker/` is a stray nested clone containing only `.git`; the working tree here is not
-  itself a git repo.
+- `__pycache__/*.pyc` are committed to the repo despite `.gitignore` listing
+  `__pycache__/` — gitignore does not apply to already-tracked files, so they show up as
+  modified on every run. `git rm -r --cached __pycache__` clears it.
+
+## Outstanding work
+
+Agreed but not finished, roughly in the order it should be tackled. The refactor is
+listed before the data work on purpose — building a data layer on top of the duplicated
+betting loop means migrating it twice.
+
+**1. UTF-8 console output.** Entry-point scripts print `✓`/emoji, which raises
+`UnicodeEncodeError` on a cp1252 Windows console before any result is shown. Fix at the
+source (e.g. a shared `enable_utf8_output()` calling `sys.stdout.reconfigure`) so the
+`PYTHONIOENCODING=utf-8` workaround in **Commands** stops being necessary.
+
+**2. CI workflow.** Correct the dead constructor signatures listed under **Known traps**,
+fix `Card('Spades', 'T')` in the performance step (invalid rank — must be `'10'`), and
+drop the `|| echo "✓ … completed"` guards that turn failures green. Also note
+`verify_installation.py` is a CI step but **always exits 0**, and its `check_files` list
+still expects `BOT_AI_GUIDE.md` / `BOT_QUICK_REFERENCE.md` at the repo root though both
+now live in `docs/` — so it reports "SOME CHECKS FAILED (5/6)" while CI goes green.
+
+**3. Unify the two betting loops.** The duplication described under **Architecture** is
+the main structural debt. Plan: make `PokerGame.betting_round`/`play_hand` the single
+implementation, parameterised by hooks a front-end supplies — an action provider for
+human turns, plus event callbacks for logging/display/delay — then delete
+`PokerUI.betting_round` and `PokerUI.play_single_hand`. `MockPokerGame` only overrides
+`betting_round(stage)` and calls `super()`, so it survives a hook-based refactor.
+Watch for behaviour the GUI copy currently gets wrong: it never sets `is_all_in`, skips
+on `stack == 0` instead, has no max-iteration guard, and doesn't force a call when a
+player checks facing a bet.
+
+**4. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
+200-hand Monte Carlo: **~78 ms per call**, which is why an exhaustive sweep over the 5 AI
+bots takes ~26 minutes while the 12 simple bots finish in under a second. Preflop is only
+169 canonical hands × 1-9 opponents = **1,521 rows** - precompute once, ship as JSON, load
+at import. Postflop can't be enumerated (~29M flop combinations), so memoise at runtime on
+(canonical hole, sorted board, opponent count). Caveat: this makes bots *deterministic*
+per situation where they currently jitter, so cached results aren't directly comparable
+to existing tournament numbers.
+
+**5. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
+data" but `save_results` writes only aggregates — win rate, total gain, final stacks — and
+overwrites the same file every run (the committed `tournament_results.json` is a single
+50-hand game). Per-hand rows (hand id, bot type, position, hole cards, board, action
+sequence, pot, net result) are tabular, append-only and query-shaped; `sqlite3` is stdlib,
+so no new dependency. This is for accumulating and querying history across runs — it does
+**not** avoid re-running simulations, which is what item 4 is for.
+
 
 ## Conventions
 

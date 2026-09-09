@@ -408,6 +408,30 @@ if __name__ == "__main__":
 # SIMPLE STRATEGY BOTS FOR BASELINE COMPARISON AND ML TRAINING
 # ============================================================================
 
+# Card.RANKS spells ten as "10", but hand keys use the standard one-character
+# poker notation ("AT", "T9o"), so ten is folded to "T" when building a key.
+RANK_VALUES = {'2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+               '10': 10, 'T': 10, 'J': 11, 'Q': 12, 'K': 13, 'A': 14}
+
+HAND_KEY_RANKS = {'10': 'T'}
+
+
+def hand_key(hole_cards, include_suitedness: bool = False) -> str:
+    """Canonical starting-hand notation, high card first (e.g. "AK", "JJ", "T9o")."""
+    r1, r2 = hole_cards[0].rank, hole_cards[1].rank
+    v1, v2 = RANK_VALUES[r1], RANK_VALUES[r2]
+    k1, k2 = HAND_KEY_RANKS.get(r1, r1), HAND_KEY_RANKS.get(r2, r2)
+
+    if v1 == v2:
+        return f"{k1}{k2}"
+
+    high, low = (k1, k2) if v1 > v2 else (k2, k1)
+    if include_suitedness:
+        suited = "s" if hole_cards[0].suit == hole_cards[1].suit else "o"
+        return f"{high}{low}{suited}"
+    return f"{high}{low}"
+
+
 class SimpleBotTop10Percent:
     """Only plays top 10% of hands pre-flop, calls post-flop"""
     
@@ -439,16 +463,8 @@ class SimpleBotTop10Percent:
             return ("call", None)
     
     def _get_hand_key(self, hole_cards):
-        """Get canonical hand representation (e.g., 'AK', 'JJ')"""
-        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
-                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
-        v1, v2 = rank_order[r1], rank_order[r2]
-        if v1 == v2:
-            return f"{r1}{r2}"
-        else:
-            high, low = (r1, r2) if v1 > v2 else (r2, r1)
-            return f"{high}{low}"
+        """Get canonical hand representation"""
+        return hand_key(hole_cards)
 
 
 class SimpleBotAlwaysAllIn:
@@ -573,16 +589,7 @@ class SimpleBotBottom50Percent:
     
     def _get_hand_key(self, hole_cards):
         """Get canonical hand representation"""
-        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
-                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
-        v1, v2 = rank_order[r1], rank_order[r2]
-        if v1 == v2:
-            return f"{r1}{r2}"
-        else:
-            high, low = (r1, r2) if v1 > v2 else (r2, r1)
-            suited = "s" if hole_cards[0].suit == hole_cards[1].suit else "o"
-            return f"{high}{low}{suited}"
+        return hand_key(hole_cards, include_suitedness=True)
 
 
 class SimpleBotNeverBet:
@@ -616,18 +623,7 @@ class SimpleBotNeverBet:
     
     def _get_hand_key(self, hole_cards):
         """Get canonical hand representation"""
-        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10}
-        v1, v2 = rank_order.get(r1), rank_order.get(r2)
-        
-        if v1 is None or v2 is None:
-            return None  # Not a premium hand
-        
-        if v1 == v2:
-            return f"{r1}{r2}"
-        else:
-            high, low = (r1, r2) if v1 > v2 else (r2, r1)
-            return f"{high}{low}"
+        return hand_key(hole_cards)
 
 
 class SimpleBotLimper:
@@ -715,15 +711,7 @@ class SimpleBotPositionBased:
     
     def _get_hand_key(self, hole_cards):
         """Get canonical hand representation"""
-        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
-                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
-        v1, v2 = rank_order[r1], rank_order[r2]
-        if v1 == v2:
-            return f"{r1}{r2}"
-        else:
-            high, low = (r1, r2) if v1 > v2 else (r2, r1)
-            return f"{high}{low}"
+        return hand_key(hole_cards)
 
 
 class SimpleBotStackBased:
@@ -743,10 +731,8 @@ class SimpleBotStackBased:
             hand_key = self._get_hand_key(hole_cards)
             
             # Determine hand quality
-            rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
-                          '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
             r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-            v1, v2 = rank_order[r1], rank_order[r2]
+            v1, v2 = RANK_VALUES[r1], RANK_VALUES[r2]
             avg_value = (v1 + v2) / 2
             is_pair = r1 == r2
             
@@ -773,15 +759,7 @@ class SimpleBotStackBased:
     
     def _get_hand_key(self, hole_cards):
         """Get canonical hand representation"""
-        r1, r2 = hole_cards[0].rank, hole_cards[1].rank
-        rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, 'T': 10,
-                      '9': 9, '8': 8, '7': 7, '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
-        v1, v2 = rank_order[r1], rank_order[r2]
-        if v1 == v2:
-            return f"{r1}{r2}"
-        else:
-            high, low = (r1, r2) if v1 > v2 else (r2, r1)
-            return f"{high}{low}"
+        return hand_key(hole_cards)
 
 
 class SimpleBotRandom:
