@@ -287,6 +287,23 @@ class PokerGame:
         """Get unfolded players excluding the specified player"""
         return [p for p in self.get_unfolded_players() if p != excluding_player]
 
+    def _contributions(self) -> dict:
+        """What each player has put into this hand.
+
+        Normally read from total_bet_by_player, accumulated as chips move.
+        Falls back to the current street's bet for any player nothing has been
+        recorded for, so a caller can set up a scenario by assigning
+        total_bet_this_round directly and still get sensible pots. The recorded
+        total is never smaller than the current street's share of it, so the
+        max is the whole-hand figure in both cases.
+        """
+        recorded = self.total_bet_by_player
+        return {
+            player.player_id: max(recorded.get(player.player_id, 0),
+                                  player.total_bet_this_round)
+            for player in self.players
+        }
+
     def create_side_pots(self):
         """Split the pot by how much of it each player is entitled to win.
 
@@ -303,7 +320,7 @@ class PokerGame:
         if len(contenders) <= 1:
             return []
 
-        contributions = dict(self.total_bet_by_player)
+        contributions = self._contributions()
         levels = sorted({contributions.get(p.player_id, 0) for p in contenders})
 
         pots = []

@@ -477,8 +477,11 @@ def test_all_in_with_folded_players():
     # Should have 2 pots (folded player excluded)
     tester.assert_equal(len(pots), 2, "Number of pots with folded player")
     
-    # Main pot: $200 (100 from players 1,2)
-    tester.assert_equal(pots[0]['amount'], 200, "Main pot excludes folded player")
+    # Main pot: $250 - 100 each from players 1 and 2, plus the $50 the folded
+    # player had already put in. Those chips stay in the pot as dead money;
+    # player 0 simply cannot win them. Excluding them made 300 chips of
+    # contributions pay out only 250, which is where hands quietly lost chips.
+    tester.assert_equal(pots[0]['amount'], 250, "Main pot includes folded player's dead money")
     tester.assert_equal(set(pots[0]['eligible_players']), {1, 2}, "Main pot doesn't include folded player")
     
     # Side pot: $50 (50 from player 2 only)
