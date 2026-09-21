@@ -130,6 +130,14 @@ keeping a copy of it.
   precomputed table of all 169 starting hands × 9 opponent counts, and memoises post-flop
   for the life of the process
 
+### Tools
+- **tools/equity_heatmap.py**: Draws the equity table as the 13x13 range chart poker
+  players already read - suited above the diagonal, offsuit below, pairs on it. Runs in
+  the terminal with ANSI colour, or exports a standalone interactive page.
+  A correct table fades smoothly from AA to 32o; sampling noise shows up as cells
+  breaking that gradient.
+- **tools/build_equity_table.py**: Builds the precomputed table
+
 ### Data
 - **poker/hand_log.py**: `HandLog`, a `GameObserver` writing one row per player per hand
   plus the action sequence to SQLite, so runs accumulate instead of overwriting

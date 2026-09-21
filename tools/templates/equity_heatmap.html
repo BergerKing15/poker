@@ -1,0 +1,951 @@
+<title>Pre-Flop Equity Grid</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --page:        #f4f4f1;
+    --surface:     #fcfcfb;
+    --ink:         #0b0b0b;
+    --ink-2:       #52514e;
+    --ink-muted:   #898781;
+    --hairline:    #e1e0d9;
+    --ring:        rgba(11, 11, 11, 0.10);
+    --good:        #006300;
+
+    /* Sequential blue, 100 -> 700. Light surface: low values recede pale. */
+    --s0:#cde2fb; --s1:#b7d3f6; --s2:#9ec5f4; --s3:#86b6ef; --s4:#6da7ec;
+    --s5:#5598e7; --s6:#3987e5; --s7:#2a78d6; --s8:#256abf; --s9:#1c5cab;
+    --s10:#184f95; --s11:#104281; --s12:#0d366b;
+
+    /* Diverging poles + neutral midpoint. */
+    --div-pos: #2a78d6;
+    --div-neg: #e34948;
+    --div-mid: #f0efec;
+
+    --cell-label: #0b0b0b;
+    --focus: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page:      #0d0d0d;
+      --surface:   #1a1a19;
+      --ink:       #ffffff;
+      --ink-2:     #c3c2b7;
+      --ink-muted: #898781;
+      --hairline:  #2c2c2a;
+      --ring:      rgba(255, 255, 255, 0.10);
+      --good:      #0ca30c;
+      --div-mid:   #383835;
+      --div-pos:   #3987e5;
+      --div-neg:   #e66767;
+      --cell-label:#ffffff;
+      --focus:     #86b6ef;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page:      #0d0d0d;
+    --surface:   #1a1a19;
+    --ink:       #ffffff;
+    --ink-2:     #c3c2b7;
+    --ink-muted: #898781;
+    --hairline:  #2c2c2a;
+    --ring:      rgba(255, 255, 255, 0.10);
+    --good:      #0ca30c;
+    --div-mid:   #383835;
+    --div-pos:   #3987e5;
+    --div-neg:   #e66767;
+    --cell-label:#ffffff;
+    --focus:     #86b6ef;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-inline: 16px;
+    padding-block: 32px 48px;
+  }
+
+  /* ---- header ---- */
+  header { margin-bottom: 24px; }
+  h1 {
+    font-size: clamp(22px, 4.2vw, 30px);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    color: var(--ink-2);
+    margin: 0;
+    max-width: 62ch;
+  }
+  .build-line {
+    color: var(--ink-muted);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    margin-top: 10px;
+  }
+
+  /* ---- filter row: one row above everything it scopes ---- */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 20px;
+    padding: 14px 16px;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+  }
+  .control-group { display: flex; flex-direction: column; gap: 7px; }
+  .control-label {
+    color: var(--ink-muted);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+  .segmented { display: flex; flex-wrap: wrap; gap: 3px; }
+  .segmented button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--ink-2);
+    cursor: pointer;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    min-height: 30px;
+    min-width: 30px;
+    padding: 4px 9px;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .segmented button:hover { background: var(--page); color: var(--ink); }
+  .segmented button[aria-pressed="true"] {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--surface);
+    font-weight: 500;
+  }
+  .segmented.wide button { font-family: "IBM Plex Sans", sans-serif; }
+  :is(button, [tabindex]):focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  /* ---- main layout ---- */
+  .panels {
+    display: grid;
+    gap: 24px;
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (max-width: 760px) {
+    .panels { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 18px;
+  }
+  .card h2 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: 0 0 4px;
+  }
+  .card .note {
+    color: var(--ink-muted);
+    font-size: 12px;
+    margin: 0 0 14px;
+  }
+
+  /* ---- the grid ---- */
+  .grid-frame { position: relative; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(13, 1fr);
+    gap: 2px;                 /* 2px surface gap between fills */
+    aspect-ratio: 1 / 1;
+    max-width: 100%;
+  }
+  .cell {
+    align-items: center;
+    border-radius: 3px;
+    color: var(--cell-label);
+    cursor: default;
+    display: flex;
+    flex-direction: column;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: clamp(7px, 1.05vw, 11px);
+    font-variant-numeric: tabular-nums;
+    justify-content: center;
+    line-height: 1.15;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .cell.empty { background: transparent; }
+  .cell .hand { font-weight: 600; }
+  .cell .val {
+    font-size: 0.82em;
+    opacity: 0.72;
+  }
+  @media (max-width: 560px) {
+    .cell .val { display: none; }
+  }
+  .grid-row { display: contents; }
+  .cell.hot { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  .axis-note {
+    color: var(--ink-muted);
+    display: flex;
+    flex-wrap: wrap;
+    font-size: 11px;
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .axis-note span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch {
+    border: 1px solid var(--ring);
+    border-radius: 2px;
+    display: inline-block;
+    height: 10px;
+    width: 10px;
+  }
+
+  /* ---- scale legend ---- */
+  .scale-bar {
+    border: 1px solid var(--ring);
+    border-radius: 3px;
+    height: 12px;
+    margin-bottom: 6px;
+    width: 100%;
+  }
+  .scale-ticks {
+    color: var(--ink-muted);
+    display: flex;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    justify-content: space-between;
+  }
+
+  /* ---- quality checks ---- */
+  .checks { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+  .check {
+    align-items: baseline;
+    border-bottom: 1px solid var(--hairline);
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    padding: 9px 0;
+  }
+  .check:last-child { border-bottom: 0; }
+  .check-name { color: var(--ink-2); font-size: 12.5px; }
+  .check-val {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .pass { color: var(--good); }
+  .pill {
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    margin-left: 7px;
+    padding: 1px 6px;
+    text-transform: uppercase;
+    vertical-align: 1px;
+  }
+
+  /* ---- tooltip ---- */
+  .tip {
+    background: var(--surface);
+    border: 1px solid var(--ring);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    left: 0;
+    padding: 9px 11px;
+    pointer-events: none;
+    position: fixed;
+    top: 0;
+    z-index: 20;
+    min-width: 132px;
+  }
+  .tip[hidden] { display: none !important; }
+  .tip .tip-hand {
+    color: var(--ink-2);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .tip .tip-eq {
+    color: var(--ink);
+    font-size: 19px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .tip-row {
+    color: var(--ink-2);
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+  }
+  .tip-key {
+    border-radius: 1px;
+    display: inline-block;
+    height: 2px;
+    margin-right: 6px;
+    vertical-align: 3px;
+    width: 10px;
+  }
+
+  /* ---- table view ---- */
+  .table-wrap { margin-top: 24px; }
+  .table-scroll { max-height: 420px; overflow: auto; }
+  table {
+    border-collapse: collapse;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    width: 100%;
+  }
+  th, td { padding: 6px 10px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  thead th {
+    background: var(--surface);
+    border-bottom: 1px solid var(--hairline);
+    color: var(--ink-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    position: sticky;
+    text-transform: uppercase;
+    top: 0;
+  }
+  tbody tr { border-bottom: 1px solid var(--hairline); }
+  tbody tr:last-child { border-bottom: 0; }
+
+  footer {
+    border-top: 1px solid var(--hairline);
+    color: var(--ink-muted);
+    font-size: 12px;
+    margin-top: 32px;
+    padding-top: 16px;
+  }
+  footer code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11.5px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Pre-Flop Equity Grid</h1>
+    <p class="standfirst">
+      Every distinct Texas Hold'em starting hand, coloured by the share of the pot it
+      expects to win. Suits are interchangeable before a board exists, so 1,326 dealable
+      combinations collapse to these 169 &mdash; the whole pre-flop problem on one screen.
+    </p>
+    <p class="build-line" id="buildLine"></p>
+  </header>
+
+  <div class="controls">
+    <div class="control-group">
+      <span class="control-label" id="oppLabel">Opponents</span>
+      <div class="segmented" id="oppPicker" role="group" aria-labelledby="oppLabel"></div>
+    </div>
+    <div class="control-group">
+      <span class="control-label" id="viewLabel">Measure</span>
+      <div class="segmented wide" id="viewPicker" role="group" aria-labelledby="viewLabel">
+        <button type="button" id="viewEquity" data-view="equity" aria-pressed="true">Equity</button>
+        <button type="button" id="viewSuited" data-view="suited" aria-pressed="false">Suited edge</button>
+      </div>
+    </div>
+    <div class="control-group">
+      <span class="control-label" id="tableLabel">Values</span>
+      <div class="segmented wide" role="group" aria-labelledby="tableLabel">
+        <button type="button" id="tableToggle" aria-pressed="false">Show table</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panels">
+    <section class="card">
+      <h2 id="gridTitle">Equity by starting hand</h2>
+      <p class="note" id="gridNote"></p>
+      <div class="grid-frame">
+        <div class="grid" id="grid" role="grid" aria-labelledby="gridTitle"></div>
+      </div>
+      <div class="axis-note">
+        <span>Rows and columns run A&nbsp;&rarr;&nbsp;2</span>
+        <span>Above the diagonal: suited</span>
+        <span>Below: offsuit</span>
+        <span>Diagonal: pairs</span>
+      </div>
+    </section>
+
+    <div style="display:flex; flex-direction:column; gap:24px;">
+      <section class="card">
+        <h2 id="scaleTitle">Scale</h2>
+        <p class="note" id="scaleNote"></p>
+        <div class="scale-bar" id="scaleBar" role="img" aria-labelledby="scaleTitle"></div>
+        <div class="scale-ticks" id="scaleTicks"></div>
+      </section>
+
+      <section class="card">
+        <h2>Does the table hold up?</h2>
+        <p class="note">Checks a correct table must pass, computed from the data on this page.</p>
+        <div class="checks" id="checks"></div>
+      </section>
+    </div>
+  </div>
+
+  <section class="card table-wrap" id="tableCard" hidden>
+    <h2 id="tableTitle">All 169 hands</h2>
+    <p class="note" id="tableNote"></p>
+    <div class="table-scroll">
+      <table aria-labelledby="tableTitle">
+        <thead>
+          <tr>
+            <th scope="col">Hand</th>
+            <th scope="col">Type</th>
+            <th scope="col">Equity</th>
+            <th scope="col">Win</th>
+            <th scope="col">Tie</th>
+            <th scope="col">Lose</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p id="footNote"></p>
+  </footer>
+</div>
+
+<div class="tip" id="tip" hidden aria-hidden="true"></div>
+
+<script>
+const TABLE = /* __EQUITY_DATA__ */ null;
+</script>
+<script>
+(function () {
+  "use strict";
+
+  var RANKS = TABLE.ranks;
+  var DATA = TABLE.data;
+  var PUBLISHED = TABLE.published;
+  var SIMS = TABLE.simulations;
+
+  var SEQ = ["--s0","--s1","--s2","--s3","--s4","--s5","--s6",
+             "--s7","--s8","--s9","--s10","--s11","--s12"];
+
+  var state = { opponents: 1, view: "equity", showTable: false, cursor: 0 };
+
+  function css(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function hexToRgb(hex) {
+    var h = hex.replace("#", "");
+    if (h.length === 3) { h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2]; }
+    return [parseInt(h.slice(0,2),16), parseInt(h.slice(2,4),16), parseInt(h.slice(4,6),16)];
+  }
+  function mix(a, b, t) {
+    var A = hexToRgb(a), B = hexToRgb(b);
+    return "rgb(" + Math.round(A[0]+(B[0]-A[0])*t) + "," +
+                    Math.round(A[1]+(B[1]-A[1])*t) + "," +
+                    Math.round(A[2]+(B[2]-A[2])*t) + ")";
+  }
+  function isDark() {
+    var stamp = document.documentElement.getAttribute("data-theme");
+    if (stamp === "dark") { return true; }
+    if (stamp === "light") { return false; }
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+
+  /* Sequential ramp. On a dark surface the anchor flips: near-zero recedes into
+     the ground, so the ramp runs dark -> light as the value rises. */
+  function rampStops() {
+    var stops = SEQ.map(css);
+    return isDark() ? stops.slice().reverse() : stops;
+  }
+  function sequential(t) {
+    var stops = rampStops();
+    t = Math.max(0, Math.min(1, t));
+    var pos = t * (stops.length - 1);
+    var i = Math.min(Math.floor(pos), stops.length - 2);
+    return mix(stops[i], stops[i + 1], pos - i);
+  }
+  /* Diverging: two opposed hues through a neutral grey midpoint. */
+  function diverging(t) {
+    var mid = css("--div-mid");
+    if (t >= 0) { return mix(mid, css("--div-pos"), Math.min(1, t)); }
+    return mix(mid, css("--div-neg"), Math.min(1, -t));
+  }
+  /* Label ink must survive its own cell: pick by depth of fill, not by hue. */
+  function labelInk(t) {
+    var deep = isDark() ? t < 0.42 : t > 0.58;
+    return deep ? (isDark() ? "#0b0b0b" : "#ffffff") : css("--cell-label");
+  }
+  /* Diverging fills deepen towards both poles, so depth is distance off zero. */
+  function divergingInk(magnitude) {
+    var deep = magnitude > 0.55;
+    return deep ? (isDark() ? "#0b0b0b" : "#ffffff") : css("--cell-label");
+  }
+
+  function handKey(i, j) {
+    if (i === j) { return RANKS[i] + RANKS[i]; }
+    var hi = RANKS[Math.min(i, j)], lo = RANKS[Math.max(i, j)];
+    return hi + lo + (i < j ? "s" : "o");
+  }
+  function handType(key) {
+    if (key.length === 2) { return "pair"; }
+    return key.slice(-1) === "s" ? "suited" : "offsuit";
+  }
+  function equityOf(key) { return DATA[key][state.opponents - 1][2]; }
+  function winOf(key) { return DATA[key][state.opponents - 1][0]; }
+  function tieOf(key) { return DATA[key][state.opponents - 1][1]; }
+
+  /* Suited edge: how much a suited hand gains over the same ranks offsuit. */
+  function suitedEdge(i, j) {
+    if (i === j) { return null; }
+    var hi = RANKS[Math.min(i, j)], lo = RANKS[Math.max(i, j)];
+    return equityOf(hi + lo + "s") - equityOf(hi + lo + "o");
+  }
+
+  function currentDomain() {
+    var vals = [];
+    for (var i = 0; i < 13; i++) {
+      for (var j = 0; j < 13; j++) {
+        var v = state.view === "equity" ? equityOf(handKey(i, j)) : suitedEdge(i, j);
+        if (v !== null) { vals.push(v); }
+      }
+    }
+    return { min: Math.min.apply(null, vals), max: Math.max.apply(null, vals) };
+  }
+
+  function pct(v, dp) { return (v * 100).toFixed(dp === undefined ? 1 : dp) + "%"; }
+  function pp(v) { return (v >= 0 ? "+" : "−") + Math.abs(v * 100).toFixed(1) + " pp"; }
+
+  /* ---------- grid ---------- */
+  var grid = document.getElementById("grid");
+  var cells = [];
+
+  function buildGrid() {
+    grid.textContent = "";
+    cells = [];
+    for (var i = 0; i < 13; i++) {
+      var row = document.createElement("div");
+      row.className = "grid-row";
+      row.setAttribute("role", "row");
+      grid.appendChild(row);
+      for (var j = 0; j < 13; j++) {
+        var cell = document.createElement("div");
+        cell.className = "cell";
+        cell.setAttribute("role", "gridcell");
+        cell.tabIndex = -1;
+        cell.dataset.i = String(i);
+        cell.dataset.j = String(j);
+        var hand = document.createElement("span");
+        hand.className = "hand";
+        var val = document.createElement("span");
+        val.className = "val";
+        cell.appendChild(hand);
+        cell.appendChild(val);
+        row.appendChild(cell);
+        cells.push(cell);
+      }
+    }
+    grid.addEventListener("pointermove", onPointer);
+    grid.addEventListener("pointerleave", hideTip);
+    grid.addEventListener("keydown", onKey);
+    grid.addEventListener("focusin", function (e) {
+      var cell = e.target.closest(".cell");
+      if (cell) { showTipFor(cell, null); }
+    });
+    grid.addEventListener("focusout", hideTip);
+  }
+
+  function paintGrid() {
+    var dom = currentDomain();
+    var span = dom.max - dom.min || 1;
+    var absMax = Math.max(Math.abs(dom.min), Math.abs(dom.max)) || 1;
+
+    for (var n = 0; n < cells.length; n++) {
+      var cell = cells[n];
+      var i = +cell.dataset.i, j = +cell.dataset.j;
+      var key = handKey(i, j);
+      var hand = cell.querySelector(".hand");
+      var val = cell.querySelector(".val");
+
+      if (state.view === "suited") {
+        var edge = suitedEdge(i, j);
+        if (edge === null) {
+          cell.className = "cell empty";
+          cell.style.background = "transparent";
+          cell.style.color = css("--ink-muted");
+          hand.textContent = key;
+          val.textContent = "";
+          cell.setAttribute("aria-label", key + ", pair, no suited form");
+          continue;
+        }
+        cell.className = "cell";
+        cell.style.background = diverging(edge / absMax);
+        cell.style.color = divergingInk(Math.abs(edge) / absMax);
+        hand.textContent = RANKS[Math.min(i, j)] + RANKS[Math.max(i, j)];
+        val.textContent = (edge * 100).toFixed(1);
+        cell.setAttribute("aria-label",
+          hand.textContent + ", suited edge " + pp(edge));
+      } else {
+        var e = equityOf(key);
+        var t = (e - dom.min) / span;
+        cell.className = "cell";
+        cell.style.background = sequential(t);
+        cell.style.color = labelInk(t);
+        hand.textContent = key;
+        val.textContent = (e * 100).toFixed(0);
+        cell.setAttribute("aria-label",
+          key + ", " + handType(key) + ", equity " + pct(e));
+      }
+    }
+    cells[state.cursor].tabIndex = 0;
+  }
+
+  /* ---------- tooltip ---------- */
+  var tip = document.getElementById("tip");
+
+  function showTipFor(cell, event) {
+    var i = +cell.dataset.i, j = +cell.dataset.j;
+    var key = handKey(i, j);
+    tip.textContent = "";
+
+    var label = document.createElement("div");
+    label.className = "tip-hand";
+    var big = document.createElement("div");
+    big.className = "tip-eq";
+
+    if (state.view === "suited") {
+      var edge = suitedEdge(i, j);
+      if (edge === null) { hideTip(); return; }
+      label.textContent = RANKS[Math.min(i, j)] + RANKS[Math.max(i, j)] + " suited edge";
+      big.textContent = pp(edge);
+      tip.appendChild(label);
+      tip.appendChild(big);
+      addRow(RANKS[Math.min(i,j)] + RANKS[Math.max(i,j)] + "s",
+             pct(equityOf(RANKS[Math.min(i,j)] + RANKS[Math.max(i,j)] + "s")));
+      addRow(RANKS[Math.min(i,j)] + RANKS[Math.max(i,j)] + "o",
+             pct(equityOf(RANKS[Math.min(i,j)] + RANKS[Math.max(i,j)] + "o")));
+    } else {
+      label.textContent = key + " · " + handType(key);
+      big.textContent = pct(equityOf(key));
+      tip.appendChild(label);
+      tip.appendChild(big);
+      addRow("win", pct(winOf(key)));
+      addRow("tie", pct(tieOf(key)));
+      addRow("lose", pct(1 - winOf(key) - tieOf(key)));
+    }
+    addRow("vs", state.opponents + (state.opponents === 1 ? " opponent" : " opponents"));
+
+    tip.hidden = false;
+    var rect = cell.getBoundingClientRect();
+    var x = event ? event.clientX + 14 : rect.right + 10;
+    var y = event ? event.clientY + 14 : rect.top;
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w > window.innerWidth - 8) { x = window.innerWidth - w - 8; }
+    if (y + h > window.innerHeight - 8) { y = window.innerHeight - h - 8; }
+    tip.style.left = Math.max(8, x) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+
+    for (var n = 0; n < cells.length; n++) { cells[n].classList.remove("hot"); }
+    cell.classList.add("hot");
+  }
+
+  function addRow(k, v) {
+    var row = document.createElement("div");
+    row.className = "tip-row";
+    var a = document.createElement("span");
+    a.textContent = k;
+    var b = document.createElement("span");
+    b.textContent = v;
+    row.appendChild(a);
+    row.appendChild(b);
+    tip.appendChild(row);
+  }
+
+  function onPointer(e) {
+    var cell = e.target.closest(".cell");
+    if (!cell || cell.classList.contains("empty")) { hideTip(); return; }
+    showTipFor(cell, e);
+  }
+  function hideTip() {
+    tip.hidden = true;
+    for (var n = 0; n < cells.length; n++) { cells[n].classList.remove("hot"); }
+  }
+
+  /* Roving tabindex: one tab stop for the grid, arrow keys inside it. */
+  function onKey(e) {
+    var moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: 13, ArrowUp: -13 };
+    if (!(e.key in moves)) { return; }
+    e.preventDefault();
+    var next = state.cursor + moves[e.key];
+    if (next < 0 || next >= cells.length) { return; }
+    cells[state.cursor].tabIndex = -1;
+    state.cursor = next;
+    cells[next].tabIndex = 0;
+    cells[next].focus();
+  }
+
+  /* ---------- scale legend ---------- */
+  function paintScale() {
+    var dom = currentDomain();
+    var bar = document.getElementById("scaleBar");
+    var ticks = document.getElementById("scaleTicks");
+    var steps = [];
+    var n;
+    if (state.view === "suited") {
+      var absMax = Math.max(Math.abs(dom.min), Math.abs(dom.max)) || 1;
+      for (n = 0; n <= 10; n++) {
+        steps.push(diverging(-1 + (n / 10) * 2));
+      }
+      bar.style.background = "linear-gradient(to right," + steps.join(",") + ")";
+      setTicks(ticks, [pp(-absMax), pp(0), pp(absMax)]);
+      bar.setAttribute("aria-label",
+        "Diverging scale from " + pp(-absMax) + " to " + pp(absMax) +
+        ", neutral grey at zero");
+      document.getElementById("scaleNote").textContent =
+        "Suited minus offsuit, same two ranks. Blue means suited is ahead.";
+    } else {
+      for (n = 0; n <= 12; n++) { steps.push(sequential(n / 12)); }
+      bar.style.background = "linear-gradient(to right," + steps.join(",") + ")";
+      setTicks(ticks, [pct(dom.min), pct((dom.min + dom.max) / 2), pct(dom.max)]);
+      bar.setAttribute("aria-label",
+        "Sequential scale from " + pct(dom.min) + " to " + pct(dom.max));
+      document.getElementById("scaleNote").textContent =
+        "Rescaled to this table size, so the full ramp is used at every opponent count.";
+    }
+  }
+  function setTicks(el, labels) {
+    el.textContent = "";
+    labels.forEach(function (text) {
+      var s = document.createElement("span");
+      s.textContent = text;
+      el.appendChild(s);
+    });
+  }
+
+  /* ---------- quality checks ---------- */
+  function renderChecks() {
+    var host = document.getElementById("checks");
+    host.textContent = "";
+
+    var keys = Object.keys(DATA);
+    var cellCount = keys.length * 9;
+
+    var monoBad = keys.filter(function (k) {
+      for (var n = 0; n < 8; n++) {
+        if (DATA[k][n][2] < DATA[k][n + 1][2] - 0.01) { return true; }
+      }
+      return false;
+    }).length;
+
+    var pairsChecked = 0, suitedBad = 0, edgeSum = 0, edgeMin = Infinity;
+    for (var i = 0; i < 13; i++) {
+      for (var j = i + 1; j < 13; j++) {
+        var hi = RANKS[i], lo = RANKS[j];
+        var d = DATA[hi + lo + "s"][0][2] - DATA[hi + lo + "o"][0][2];
+        pairsChecked++;
+        edgeSum += d;
+        if (d < edgeMin) { edgeMin = d; }
+        if (d <= 0) { suitedBad++; }
+      }
+    }
+
+    var worstKey = null, worstDiff = 0;
+    Object.keys(PUBLISHED).forEach(function (k) {
+      var d = DATA[k][0][2] - PUBLISHED[k];
+      if (Math.abs(d) > Math.abs(worstDiff)) { worstDiff = d; worstKey = k; }
+    });
+
+    var sumBad = 0;
+    keys.forEach(function (k) {
+      for (var n = 0; n < 9; n++) {
+        var row = DATA[k][n];
+        if (Math.abs(row[0] + row[1] + (1 - row[0] - row[1]) - 1) > 1e-6) { sumBad++; }
+      }
+    });
+
+    add("Cells present", cellCount + " / 1521", cellCount === 1521);
+    add("Equity falls as opponents are added",
+        (keys.length - monoBad) + " / " + keys.length + " hands", monoBad === 0);
+    add("Suited beats offsuit",
+        (pairsChecked - suitedBad) + " / " + pairsChecked + " pairs", suitedBad === 0);
+    add("Smallest suited edge", pp(edgeMin), edgeMin > 0);
+    add("Mean suited edge", pp(edgeSum / pairsChecked), true);
+    add("Probabilities sum to 1", sumBad === 0 ? "every cell" : sumBad + " bad", sumBad === 0);
+    add("Largest gap vs published",
+        worstKey + " " + pp(worstDiff), Math.abs(worstDiff) < 0.02);
+
+    function add(name, value, ok) {
+      var row = document.createElement("div");
+      row.className = "check";
+      var a = document.createElement("span");
+      a.className = "check-name";
+      a.textContent = name;
+      var b = document.createElement("span");
+      b.className = "check-val" + (ok ? " pass" : "");
+      b.textContent = value;
+      if (ok) {
+        var pill = document.createElement("span");
+        pill.className = "pill";
+        pill.textContent = "pass";
+        b.appendChild(pill);
+      }
+      row.appendChild(a);
+      row.appendChild(b);
+      host.appendChild(row);
+    }
+  }
+
+  /* ---------- table view ---------- */
+  function renderTable() {
+    var body = document.getElementById("tableBody");
+    body.textContent = "";
+    var rows = Object.keys(DATA).map(function (k) {
+      return { key: k, e: equityOf(k), w: winOf(k), t: tieOf(k) };
+    }).sort(function (a, b) { return b.e - a.e; });
+
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      [r.key, handType(r.key), pct(r.e), pct(r.w), pct(r.t), pct(1 - r.w - r.t)]
+        .forEach(function (text, idx) {
+          var td = document.createElement(idx === 0 ? "th" : "td");
+          if (idx === 0) { td.scope = "row"; }
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+      body.appendChild(tr);
+    });
+    document.getElementById("tableNote").textContent =
+      "Ranked by equity against " + state.opponents +
+      (state.opponents === 1 ? " opponent." : " opponents.") +
+      " The same numbers the grid colours.";
+  }
+
+  /* ---------- controls ---------- */
+  function buildOpponents() {
+    var host = document.getElementById("oppPicker");
+    for (var n = 1; n <= 9; n++) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.id = "opp" + n;
+      b.textContent = String(n);
+      b.dataset.n = String(n);
+      b.setAttribute("aria-pressed", n === 1 ? "true" : "false");
+      b.addEventListener("click", function (e) {
+        state.opponents = +e.currentTarget.dataset.n;
+        Array.prototype.forEach.call(host.children, function (child) {
+          child.setAttribute("aria-pressed",
+            child.dataset.n === String(state.opponents) ? "true" : "false");
+        });
+        render();
+      });
+      host.appendChild(b);
+    }
+  }
+
+  function wireViews() {
+    var picker = document.getElementById("viewPicker");
+    Array.prototype.forEach.call(picker.children, function (b) {
+      b.addEventListener("click", function (e) {
+        state.view = e.currentTarget.dataset.view;
+        Array.prototype.forEach.call(picker.children, function (child) {
+          child.setAttribute("aria-pressed",
+            child.dataset.view === state.view ? "true" : "false");
+        });
+        hideTip();
+        render();
+      });
+    });
+
+    var toggle = document.getElementById("tableToggle");
+    toggle.addEventListener("click", function () {
+      state.showTable = !state.showTable;
+      toggle.setAttribute("aria-pressed", state.showTable ? "true" : "false");
+      toggle.textContent = state.showTable ? "Hide table" : "Show table";
+      document.getElementById("tableCard").hidden = !state.showTable;
+      if (state.showTable) { renderTable(); }
+    });
+  }
+
+  function render() {
+    paintGrid();
+    paintScale();
+    var title = document.getElementById("gridTitle");
+    var note = document.getElementById("gridNote");
+    if (state.view === "suited") {
+      title.textContent = "The suited edge";
+      note.textContent = "How much being suited is worth, in points of equity. " +
+        "Every one of the 78 rank pairs is positive — the gap is small, " +
+        "so getting the sign right everywhere is the real test of the sampling.";
+    } else {
+      title.textContent = "Equity by starting hand";
+      note.textContent = "Share of the pot each hand expects to win against " +
+        state.opponents + (state.opponents === 1 ? " opponent" : " opponents") +
+        ", played to showdown.";
+    }
+    if (state.showTable) { renderTable(); }
+  }
+
+  function boot() {
+    document.getElementById("buildLine").textContent =
+      "169 hands × 9 opponent counts = 1,521 cells · " +
+      SIMS.toLocaleString() + " simulations each · standard error ≈ " +
+      (0.5 / Math.sqrt(SIMS)).toFixed(4);
+    document.getElementById("footNote").textContent = TABLE.footer;
+
+    buildOpponents();
+    wireViews();
+    buildGrid();
+    renderChecks();
+    render();
+
+    if (window.matchMedia) {
+      var mq = window.matchMedia("(prefers-color-scheme: dark)");
+      var repaint = function () { paintGrid(); paintScale(); };
+      if (mq.addEventListener) { mq.addEventListener("change", repaint); }
+    }
+    new MutationObserver(function () { paintGrid(); paintScale(); })
+      .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  }
+
+  boot();
+})();
+</script>

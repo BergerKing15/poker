@@ -16,6 +16,8 @@ python run_tournament.py --log hands.db   # record every hand to SQLite
 python -m tools.verify_installation       # smoke check: imports, bot types, game creation
 python -m tools.check_prints              # fail on prints outside a DEBUG guard
 python -m tools.build_equity_table        # precompute the pre-flop equity table
+python -m tools.equity_heatmap            # draw that table as a heat map
+python -m tools.equity_heatmap --html g.html   # ...as a standalone page
 ```
 
 ### Tests
@@ -188,6 +190,10 @@ Nothing outstanding from the last round. Worth knowing for whatever comes next:
   comparable with numbers from after it.
 - `docs/` still describes the pre-reorganisation layout and the deleted root suite. Those
   are historical design notes, not instructions; trust the source.
+- `tools/equity_heatmap.py` renders the table as a 13x13 range chart (suited above the
+  diagonal, offsuit below, pairs on it) in the terminal or as a standalone page from
+  `tools/templates/equity_heatmap.html`. Its `--checks` mode is the quickest way to
+  confirm a freshly built table is sane.
 
 ## Conventions
 
