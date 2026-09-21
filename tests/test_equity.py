@@ -117,12 +117,18 @@ class TestHandStrengthCategories(EquityTestCase):
         self.assertEqual(self.category("KS KD", "KC 5H 5D 5S 2C", 1), "excellent")
 
     def test_top_band_is_reachable_at_every_table_size(self):
-        """With fixed offsets the top band was unreachable past four players."""
+        """With fixed offsets the top band was unreachable past four players.
+
+        Uses a royal flush, which no opponent can match or beat, so the only
+        thing under test is whether the band can be reached at all. A merely
+        strong hand will not do: kings full of fives loses often enough to the
+        case five nine-handed to fall out of the top band on merit.
+        """
         for opponents in range(1, 10):
             with self.subTest(opponents=opponents):
                 self.assertEqual(
                     self.calc.get_hand_strength(
-                        hand("KS KD"), hand("KC 5H 5D 5S 2C"), opponents),
+                        hand("AS KS"), hand("QS JS 10S"), opponents),
                     "excellent")
 
     def test_categories_are_ordered_by_equity(self):
