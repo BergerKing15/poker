@@ -138,6 +138,70 @@ class TestHandStrengthCategories(EquityTestCase):
         self.assertLessEqual(order.index(weak), order.index(strong))
 
 
+class TestAgainstKnownHands(EquityTestCase):
+    """calculate_vs_specific_hands: equity against hands that are known."""
+
+    def vs(self, hole, opponents, board=""):
+        return self.calc.calculate_vs_specific_hands(
+            hand(hole), hand(board) if board else [],
+            [hand(o) for o in opponents])
+
+    def test_aces_beat_a_known_worse_hand_most_of_the_time(self):
+        self.assertGreater(self.vs("AS AH", ["KS KH"])["equity"], 0.75)
+
+    def test_dominated_hand_is_behind(self):
+        self.assertLess(self.vs("KS QH", ["AS AD"])["equity"], 0.25)
+
+    def test_already_decided_board_is_certain(self):
+        # Quad aces against a hand that cannot improve past them.
+        result = self.vs("AS AH", ["2C 3D"], "AD AC 9H 7S 4S")
+        self.assertEqual(result["equity"], 1.0)
+
+    def test_identical_hands_split(self):
+        result = self.vs("AS KH", ["AD KC"], "2C 7D 9H 4S 3S")
+        self.assertEqual(result["tie_prob"], 1.0)
+
+    def test_probabilities_sum_to_one(self):
+        result = self.vs("AS AH", ["KS KH", "QS QH"])
+        self.assertAlmostEqual(
+            result["win_prob"] + result["tie_prob"] + result["lose_prob"],
+            1.0, places=6)
+
+    def test_more_known_opponents_lowers_equity(self):
+        one = self.vs("AS AH", ["KS KH"])["equity"]
+        two = self.vs("AS AH", ["KS KH", "QS QH"])["equity"]
+        self.assertGreater(one, two)
+
+    def test_rejects_a_malformed_request(self):
+        with self.assertRaises(ValueError):
+            self.calc.calculate_vs_specific_hands(hand("AS"), [], [hand("KS KH")])
+
+
+class TestBoardProgression(EquityTestCase):
+    def test_every_legal_board_size_is_accepted(self):
+        for board in ("", "2C 7D 9H", "2C 7D 9H 4S", "2C 7D 9H 4S 3C"):
+            with self.subTest(board=board or "pre-flop"):
+                result = self.calc.calculate_win_probability(
+                    hand("AS KH"), hand(board) if board else [], 2)
+                self.assertGreaterEqual(result["equity"], 0.0)
+
+    def test_a_flush_draw_improves_when_it_gets_there(self):
+        draw = self.equity("AS 2S", "KS 9S 4D", 1)
+        made = self.equity("AS 2S", "KS 9S 4S", 1)
+        self.assertGreater(made, draw)
+
+    def test_a_dead_draw_is_worse_than_the_draw_was(self):
+        draw = self.equity("AS 2S", "KS 9S 4D", 1)
+        bricked = self.equity("AS 2S", "KS 9S 4D 7H 8C", 1)
+        self.assertGreater(draw, bricked)
+
+    def test_the_river_leaves_no_uncertainty(self):
+        result = self.calc.calculate_win_probability(
+            hand("KS KD"), hand("KC 5H 5D 5S 2C"), 1)
+        # A decided hand: the only variable left is the opponent's holding.
+        self.assertGreater(result["equity"], 0.9)
+
+
 class TestCache(unittest.TestCase):
     def setUp(self):
         self.calc = CachedEquityCalculator(num_simulations=200,

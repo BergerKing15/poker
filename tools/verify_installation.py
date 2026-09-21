@@ -166,7 +166,7 @@ if __name__ == "__main__":
         print("\nQuick start:")
         print("  python play.py              # Play the game")
         print("  python run_tournament.py    # Run a bot tournament")
-        print("  python all_tests.py         # Run all tests")
+        print("  python -m unittest discover -s tests -t .   # Run all tests")
         print("\nDocumentation:")
         print("  docs/BOT_AI_GUIDE.md        # Comprehensive guide")
         print("  docs/BOT_QUICK_REFERENCE.md # Quick reference")

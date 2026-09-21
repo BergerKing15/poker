@@ -32,9 +32,6 @@ jobs:
     - name: Verify installation
       run: python -m tools.verify_installation
 
-    - name: Test all bot type imports
-      run: python test_all_bots.py
-
     - name: Syntax check all package files
       run: |
         python -m compileall -q poker tools scripts
@@ -87,10 +84,7 @@ jobs:
         print(f"All {len(BotTournament.BOT_FACTORY)} bot types played hands")
         EOF
 
-    - name: Run all tests
-      run: python all_tests.py
-
-    - name: Run unit tests
+    - name: Run tests
       run: python -m unittest discover -s tests -t . -v
 
     - name: Code quality checks

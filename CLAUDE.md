@@ -20,11 +20,8 @@ python -m tools.build_equity_table        # precompute the pre-flop equity table
 
 ### Tests
 
-Two suites, both run by CI:
-
 ```bash
-python -m unittest discover -s tests -t .   # 139 unit tests, ~2 min
-python all_tests.py                         # legacy suite, 147 assertions, ~85s
+python -m unittest discover -s tests -t .   # the whole suite, ~2.5 min
 ```
 
 `-t .` sets the top-level directory so `poker` and `tests.support` import; discovery
@@ -41,7 +38,7 @@ python -m unittest discover -s tests -t . -k '*Notation*'  # glob
 `-k '*Notation*'` runs eight. "NO TESTS RAN" usually means that. `-v` lists names, `-f`
 stops at the first failure.
 
-Most modules finish in seconds; `test_betting` (~100s) and `test_equity` (~160s) are slow
+Most modules finish in seconds; `test_betting` (~100s) and `test_equity` (~190s) are slow
 because they sample. Run the module you are touching, and the full discover before
 committing.
 
@@ -166,12 +163,6 @@ to see the swallowed error, or call `decide_action` directly.
   reproducibility, but where a hand's true equity sits within a standard error or two of
   a `get_hand_strength` category edge, assert with `assert_hand_strength_in` and a set of
   acceptable labels — pinning one label there tests the sampler's luck, not the code.
-- `all_tests.py` imports each suite and calls its `test_*` functions directly, because
-  the suites invoke their tests from a `__main__` block — plain `import` runs nothing.
-  Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so its
-  assertions register against a different `GameTester` class and the tally reads zero.
-  Failures are counted, not raised (`assert_*` records and returns), so the runner reads
-  `GameTester.totals()` and exits 2 if no assertion ran at all.
 - Side pots are built from **whole-hand** contributions (`total_bet_by_player`, via
   `_contributions()`), not `total_bet_this_round`, which `reset_round_bets` clears every
   street — reading the latter meant showdown saw only the river's betting and the rest of
@@ -191,12 +182,8 @@ counts and takes roughly half an hour across 11 workers. Background it with a ru
 keeps the parent alive — a detached shell `&` kills the coordinator and the workers finish
 into nothing.
 
-**2. Retire the legacy suite.** `all_tests.py`, `game_test_suite.py`,
-`win_probability_test_suite.py`, `test_bot_ai.py`, `test_all_bots.py` and
-`test_tourney_quick.py` still sit at the root and duplicate what `tests/` now covers.
-Port anything unique, then delete them and drop the `all_tests.py` step from CI.
-
-**3. Refresh README.md.** It still describes the flat layout and the old assertion counts.
+**2. Refresh README.md.** It still describes the flat layout, the deleted root suite and
+old assertion counts.
 
 ## Conventions
 
@@ -205,11 +192,6 @@ Port anything unique, then delete them and drop the `all_tests.py` step from CI.
   `silent_game()` returns a game whose observer does nothing so tests never block on
   `input()`, `ScriptedObserver` stands in for a front-end, `FixedBot` always returns one
   action, and `GameScript`/`ScriptedGame` pin the cards dealt.
-- The legacy root suite uses `GameTester`'s `assert_*` helpers, which **record** failures
-  rather than raising. `all_tests.py` therefore imports each suite, calls its `test_*`
-  functions directly and reads `GameTester.totals()`, exiting 2 if no assertion ran at
-  all. Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so
-  assertions register against a different `GameTester` class and the tally reads zero.
 - Equity assertions are Monte Carlo, so bound them on the measured value with room for
   noise (~0.007 std error at 5,000 simulations, ~0.01 at 2,500); a bound hugging the true
   value within ~3σ will flake. Where a hand's real equity sits within a standard error of
