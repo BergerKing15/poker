@@ -4,9 +4,6 @@ Run a large tournament with simple bots only (no AI).
 Designed to take ~2-3 minutes and complete without hangs.
 """
 
-import sys
-sys.path.insert(0, '/home/noahberg/Projects/PokerAI')
-
 from poker.tournament import BotTournament
 
 def main():

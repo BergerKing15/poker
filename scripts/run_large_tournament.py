@@ -4,9 +4,6 @@ Run a very large tournament with diverse bot combinations.
 Designed to take ~5 minutes with progress updates every 15 seconds.
 """
 
-import sys
-sys.path.insert(0, '/home/noahberg/Projects/PokerAI')
-
 from poker.tournament import BotTournament
 
 def main():

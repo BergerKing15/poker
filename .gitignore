@@ -40,3 +40,7 @@ Thumbs.db
 # Project specific
 *.log
 .cache/
+
+# Generated hand logs (the pre-flop equity table under poker/data/ IS committed)
+*.db
+!Thumbs.db

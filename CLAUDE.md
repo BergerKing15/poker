@@ -147,9 +147,9 @@ to see the swallowed error, or call `decide_action` directly.
   `python -m tools.check_prints` enforces the print-behind-DEBUG convention with an AST
   walk and a documented allowlist — plain grep matched the `__main__` demos and warned on
   every run.
-- `scripts/run_simple_tournament.py` and `scripts/run_large_tournament.py` start with a
-  hardcoded `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — dead on this
-  machine; they only work when run from the repo root.
+- Everything is run from the repo root: the package is imported as `poker`, not
+  installed, so `python -m tools.x` and `python play.py` work while running a file from
+  inside `tools/` or `scripts/` does not.
 - Starting-range constants (`TOP_10_PERCENT`, `BOTTOM_50_PERCENT`, `PREMIUM_HANDS`,
   `EARLY_HANDS`/`LATE_HANDS`) must be written in the same high-card-first notation
   `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
