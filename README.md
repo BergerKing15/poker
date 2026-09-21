@@ -53,7 +53,7 @@ pip install Pillow
 ## Running the Game
 
 ```bash
-python poker_ui.py
+python play.py
 ```
 
 The game will open a configuration window where you can:
@@ -92,45 +92,71 @@ The game will open a configuration window where you can:
 
 ## Architecture
 
+```
+poker/          engine, bots, equity, tournament runner
+poker/ui/       Tkinter front-ends
+tests/          unittest suite
+tools/          developer utilities
+scripts/        ready-made tournament runs
+assets/         card images
+docs/           design notes
+play.py, run_tournament.py    launchers
+```
+
 ### Core Game Engine
-- **poker_game.py**: Game logic, card evaluation, AI decision making
-  - `PokerGame`: Main game orchestrator with bot integration
+- **poker/game.py**: Game logic, card evaluation, hand flow
+  - `PokerGame`: Blinds, betting rounds, side pots, showdown
   - `HandEvaluator`: 5-card hand ranking and comparison
-  - `Card`, `Deck`: Card and deck management
-  - `Player`: Player state and actions
+  - `Card`, `Deck`, `Player`: Cards and player state
+  - `GameObserver` / `ConsoleObserver` / `GameAborted`: the front-end contract
+
+The engine owns the betting rules and drives a hand through observer hooks
+(`on_hand_start`, `on_stage`, `get_human_action`, `on_action`, `on_hand_end`, and so on).
+Every hook defaults to a no-op, so headless play and tournaments pass no observer at all.
+There is exactly one betting implementation — the GUI runs the same loop rather than
+keeping a copy of it.
 
 ### Poker Bot AI System
-- **poker_bot.py**: Advanced game theory-based AI (NEW)
-  - `PokerBot`: Individual AI player with position awareness
-  - `PokerBotType`: Defines playing style (tightness & aggression)
-  - `BotManager`: Manages pool of varied bots
-  - Features: Win probability calculations, position awareness, intelligent aggression
+- **poker/bot.py**: Game theory based AI
+  - `PokerBot`: Position-aware decisions from equity and pot odds
+  - `PokerBot.TYPES`: TAG, LAG, CTR, NIT, FISH
+  - 12 `SimpleBot*` fixed-strategy baselines used as controls
+- **poker/notation.py**: Starting-hand notation (`AA`, `AKs`, `T9o`) and the 169-hand
+  enumeration
+
+### Equity
+- **poker/equity.py**: `WinProbabilityCalculator`, Monte Carlo, returns win/tie/lose/equity
+- **poker/equity_cache.py**: `CachedEquityCalculator` — answers pre-flop from a
+  precomputed table of all 169 starting hands × 9 opponent counts, and memoises post-flop
+  for the life of the process
+
+### Data
+- **poker/hand_log.py**: `HandLog`, a `GameObserver` writing one row per player per hand
+  plus the action sequence to SQLite, so runs accumulate instead of overwriting
+- **poker/tournament.py**: `BotTournament` with an optional `hand_log_path`
 
 ### UI & Display
-- **poker_ui.py**: Tkinter GUI and display
-  - `PokerUI`: Main UI class
-  - Display updates with image caching for performance
-  - Player action handling and validation
-  - Optional equity display
+- **poker/ui/game_window.py**: `PokerUI` — the table, with image caching and an optional
+  equity readout
+- **poker/ui/tournament_window.py**: live tournament analytics dashboard
 
-### Testing & Documentation
-- **all_tests.py**: Master test runner - runs all test suites at once
-- **game_test_suite.py**: Comprehensive game logic tests (91 assertions)
-- **win_probability_test_suite.py**: Win probability calculator tests
-- **test_bot_ai.py**: Bot AI decision tests
-- **docs/BOT_AI_GUIDE.md**: Comprehensive AI documentation
-- **docs/BOT_QUICK_REFERENCE.md**: Quick reference guide
+### Testing
+- **tests/**: `unittest` suite, 179 tests
+- **tests/support.py**: shared helpers — card shorthand, scripted observers, fixed bots
 
 #### Running Tests
 ```bash
-# Run all tests at once (recommended)
-python all_tests.py
+# Everything (~2.5 minutes)
+python -m unittest discover -s tests -t .
 
-# Or run individual test suites
-python game_test_suite.py
-python win_probability_test_suite.py
-python test_bot_ai.py
+# One module, class or test
+python -m unittest tests.test_betting
+python -m unittest tests.test_betting.TestMinimumRaise
+python -m unittest discover -s tests -t . -k raise
 ```
+
+`-t .` sets the top-level directory so the packages import; discovery fails without it.
+Note that `-k` matches the test *method* name, not the class.
 
 ## Performance Benchmarks
 
@@ -143,16 +169,13 @@ python test_bot_ai.py
 
 ### Test Suite Performance
 ```
-$ python all_tests.py
-PASSED   | Game Logic Tests                         91 assertions
-PASSED   | Win Probability Calculator Tests         44 assertions
-PASSED   | Bot AI Decision Tests                    0 assertions
-Assertions: 135 passed, 0 failed
+$ python -m unittest discover -s tests -t .
+Ran 179 tests in 242s
+OK (skipped=3)
 ```
-Runtime is roughly 1-2 minutes, nearly all of it the win probability suite's
-Monte Carlo simulations. The Bot AI suite is demonstration output plus a
-starting-range check that raises on failure, so it contributes no counted
-assertions.
+Most modules finish in under five seconds. The time is dominated by the two that sample:
+`test_betting` (~100s) and `test_equity` (~190s). The three skips are checks against the
+precomputed equity table, which skip when it has not been built.
 
 ### Memory Usage
 - **Base Application**: ~15-20 MB
@@ -199,7 +222,7 @@ assertions.
 To see the game in action:
 
 ```bash
-python poker_ui.py
+python play.py
 ```
 
 **Game Features Visible:**
@@ -258,7 +281,8 @@ NUM_SIMULATIONS_SETUP = 5000  # Win probability calculations
 
 ## Code Quality
 
-- **135 Test Assertions**: Comprehensive test coverage across 3 test suites
+- **179 Tests**: `unittest` suite covering the engine, bots, equity, caching and the
+  SQLite hand log
 - **Type Hints**: Full Optional[] type annotations throughout
 - **Helper Methods**: Clean abstractions for common operations
 - **Debug Flags**: Consistent debug output management
@@ -293,10 +317,13 @@ This poker game implementation is provided as-is for educational purposes. The p
 - [ ] **Keyboard Shortcuts**: Improve UI responsiveness with hotkeys
 
 ### 🧠 Machine Learning Integration
+- [x] **Hand History Database**: Per-hand SQLite records to train on (`poker/hand_log.py`)
 - [ ] **Opponent Modeling**: Track AI opponent patterns and adapt strategy
 - [ ] **Neural Network Hand Evaluation**: Learn hand strength beyond heuristics
 - [ ] **Reinforcement Learning**: Self-play training for AI improvement
 - [ ] **Clustering Algorithm**: Group similar game situations for faster lookup
+- [x] **Precomputed Equity**: Pre-flop lookup table plus post-flop memoisation
+  (`poker/equity_cache.py`)
 
 ### 🎲 Advanced Game Theory
 - [ ] **GTO (Game Theory Optimal) Solver**: Calculate Nash equilibrium strategies
@@ -322,7 +349,7 @@ This poker game implementation is provided as-is for educational purposes. The p
 - [ ] **Async/Await**: Use asyncio for smoother UI during AI thinking
 - [ ] **Cython Compilation**: Compile critical paths to C for 10x+ speed
 - [ ] **Plugin Architecture**: Allow custom AI implementations
-- [ ] **Database Integration**: Store games in SQLite/PostgreSQL
+- [x] **Database Integration**: Games stored in SQLite (`--log` on the tournament runner)
 - [ ] **Configuration Hot-reload**: Change settings without restart
 
 ### 🚀 Deployment
@@ -343,34 +370,40 @@ This poker game implementation is provided as-is for educational purposes. The p
 - **Trigger**: Pushes to `main`/`develop`, all pull requests
 
 **Pipeline Steps:**
-1. **Syntax Validation** (`py_compile`)
-   - Validates all Python files compile without syntax errors
-   - Runs: `python -m py_compile poker_game.py poker_ui.py ...`
+1. **Installation check** (`python -m tools.verify_installation`)
+   - Imports, bot types, game creation, a bot decision and an equity calculation
+   - Exits non-zero on failure
 
-2. **Comprehensive Testing**
-   - Game logic tests (91 assertions)
-   - Win probability calculations (44 assertions)
-   - Bot AI decision making
-   - Runs: `python all_tests.py` (135 assertions, ~1-2 minutes)
+2. **Syntax validation**
+   - `python -m compileall -q poker tools scripts`
 
-3. **Code Quality Checks**
-   - Verifies import chain integrity
-   - Checks for print statements in production code
-   - Validates type annotations
+3. **Bot interface checks**
+   - Builds all 17 registered bots and asserts the `decide_action` contract
+   - Plays real hands with every bot type, because a bot that raises is swallowed by the
+     engine's fallback and would otherwise look merely unlucky
 
-4. **Performance Validation**
-   - Benchmarks hand evaluation speed
-   - Ensures performance hasn't regressed
-   - Requires: <1.0ms for hand evaluation batch
+4. **Tests**
+   - `python -m unittest discover -s tests -t . -v`
+
+5. **Code quality**
+   - Import chain integrity
+   - `python -m tools.check_prints`: an AST walk that fails on prints outside a `DEBUG`
+     guard, with a documented allowlist
+
+6. **Performance check**
+   - Benchmarks hand evaluation, requiring under 1.0s per 1000 evaluations
+
+Every step propagates its exit code — there is no `|| echo` masking, so a green badge
+means the pipeline actually passed.
 
 **Badge Status**: ![Tests](https://github.com/BergerKing15/poker/actions/workflows/tests.yml/badge.svg)
 
 **Quick Local Testing**:
 ```bash
-python all_tests.py              # Run all 135 assertions (~1-2 min)
-python game_test_suite.py        # Game logic tests
-python win_probability_test_suite.py  # Equity calculator
-python test_bot_ai.py            # Bot AI validation
+python -m unittest discover -s tests -t .      # the whole suite (~2.5 min)
+python -m unittest tests.test_betting          # one module
+python -m tools.verify_installation            # installation smoke check
+python -m tools.check_prints                   # print-guard check
 ```
 
 ## License
