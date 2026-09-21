@@ -173,17 +173,21 @@ to see the swallowed error, or call `decide_action` directly.
 
 ## Outstanding work
 
-**1. Build and ship the pre-flop equity table.** `poker/equity_cache.py` and
-`tools/build_equity_table.py` exist, but `poker/data/preflop_equity.json` has not been
-built, so `CachedEquityCalculator` falls back to sampling and three tests in
-`tests/test_equity.py` skip. Run
-`python -m tools.build_equity_table --simulations 10000`; it is 169 hands × 9 opponent
-counts and takes roughly half an hour across 11 workers. Background it with a runner that
-keeps the parent alive — a detached shell `&` kills the coordinator and the workers finish
-into nothing.
+Nothing outstanding from the last round. Worth knowing for whatever comes next:
 
-**2. Refresh README.md.** It still describes the flat layout, the deleted root suite and
-old assertion counts.
+- `poker/data/preflop_equity.json` is a committed build artifact: 1521 cells at 10,000
+  simulations, about 0.005 standard error, built by
+  `python -m tools.build_equity_table --simulations 10000` in roughly an hour across 11
+  workers. Rebuild it only to change the sample size; it is deterministic given that
+  count. Background it with a runner that keeps the parent alive — a detached shell `&`
+  kills the coordinator and the workers finish into nothing. The builder's own ETA is
+  linear and so badly pessimistic: work runs longest-first (all nine-opponent cells,
+  then eight, down to heads-up), so the rate rises throughout.
+- Bots are now **deterministic pre-flop**, since equity comes from the table rather than
+  a fresh sample. Reproducible, but tournament numbers from before the table are not
+  comparable with numbers from after it.
+- `docs/` still describes the pre-reorganisation layout and the deleted root suite. Those
+  are historical design notes, not instructions; trust the source.
 
 ## Conventions
 
