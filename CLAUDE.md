@@ -6,43 +6,91 @@ in CI; 3.13 works locally.
 
 ## Commands
 
+Run everything from the repo root; the package is imported as `poker`, not installed.
+
 ```bash
-python poker_ui.py            # play the GUI game (Tkinter + Pillow required)
-python tournament_ui.py       # tournament dashboard GUI
-python bot_tourney.py         # full headless bot tournament -> tournament_results.json
-python bot_tourney.py --fast  # same, but every AI bot is swapped for "Random" (seconds, not minutes)
-python bot_tourney.py --ui    # tournament with the analytics dashboard
-python verify_installation.py # smoke check: imports, bot types, game creation
-python check_prints.py        # fail if an engine module prints outside a DEBUG guard
-python all_tests.py           # all 3 suites, 135 assertions (~75-140s)
+python play.py                  # play the GUI game (Tkinter + Pillow required)
+python run_tournament.py        # headless bot tournament -> tournament_results.json
+python run_tournament.py --ui   # tournament with the analytics dashboard
+python run_tournament.py --log hands.db   # record every hand to SQLite
+python -m tools.verify_installation       # smoke check: imports, bot types, game creation
+python -m tools.check_prints              # fail on prints outside a DEBUG guard
+python -m tools.build_equity_table        # precompute the pre-flop equity table
 ```
 
-Individual suites: `game_test_suite.py`, `win_probability_test_suite.py`, `test_bot_ai.py`,
-`test_all_bots.py` (bot registry), `test_tourney_quick.py` (short tournament).
+### Tests
 
-Every entry point calls `console.enable_utf8_output()` before printing, which is what
-keeps the `✓`/`❌`/emoji output from dying with `UnicodeEncodeError` on a cp1252 Windows
-console. Call it first in any new script that prints non-ASCII; without it the traceback
-lands mid-run and looks like a test failure.
+Two suites, both run by CI:
+
+```bash
+python -m unittest discover -s tests -t .   # 139 unit tests, ~2 min
+python all_tests.py                         # legacy suite, 147 assertions, ~85s
+```
+
+`-t .` sets the top-level directory so `poker` and `tests.support` import; discovery
+fails without it. While iterating, narrow instead of running everything:
+
+```bash
+python -m unittest tests.test_betting                    # one module
+python -m unittest tests.test_betting.TestMinimumRaise   # one class
+python -m unittest discover -s tests -t . -k raise       # substring match
+python -m unittest discover -s tests -t . -k '*Notation*'  # glob
+```
+
+`-k` matches the **method** name, not the class, so `-k notation` runs nothing while
+`-k '*Notation*'` runs eight. "NO TESTS RAN" usually means that. `-v` lists names, `-f`
+stops at the first failure.
+
+Most modules finish in seconds; `test_betting` (~100s) and `test_equity` (~160s) are slow
+because they sample. Run the module you are touching, and the full discover before
+committing.
+
+Every entry point calls `poker.console.enable_utf8_output()` before printing, which keeps
+the `✓`/emoji output from dying with `UnicodeEncodeError` on a cp1252 Windows console.
+Call it first in any new script that prints non-ASCII; without it the traceback lands
+mid-run and looks like a test failure.
 
 ## Architecture
 
-- `poker_game.py` — the engine. `Card`/`Deck`, `HandEvaluator` (static, evaluates all
-  C(7,5) combos), `Player`, and `PokerGame` (blinds, betting rounds, side pots, showdown).
-  Headless; `PokerGame.DEBUG` gates all its printing.
-- `poker_bot.py` — `PokerBot` (equity + position + pot-odds decisions, 5 styles in
-  `PokerBot.TYPES`: TAG/LAG/CTR/NIT/FISH), `BotManager`, and 12 `SimpleBot*` fixed-strategy
-  baselines used as tournament controls / ML training opponents.
-- `win_probability.py` — `WinProbabilityCalculator.calculate_win_probability()`, Monte
-  Carlo, returns `{win_prob, tie_prob, lose_prob, equity}`. This is the hot path in any
-  tournament involving `PokerBot`s.
-- `poker_ui.py` — `PokerUI`. Runs the hand loop on a daemon thread and blocks on human
-  input via `self.current_player_action`.
-- `bot_tourney.py` — `BotTournament`, plus `ProgressTracker` (background thread, prints
-  progress every N seconds). `tournament_ui.py` is the GUI equivalent.
-- `config.py` — all tunable constants (window size, blinds, `NUM_SIMULATIONS_SETUP`,
-  `ENABLE_DEBUG`). Prefer adding constants here over inlining literals.
-- `cards-png-100px/` — card images, one per `<rank><suit-initial>.png` (`10D.png`, `AS.png`).
+```
+poker/          engine, bots, equity, tournament runner
+poker/ui/       Tk front-ends
+tests/          unittest suite
+tools/          check_prints, verify_installation, build_equity_table, diagnose_hang
+scripts/        ready-made tournament runs
+assets/         card images
+play.py, run_tournament.py    launchers
+```
+
+- `poker/game.py` — the engine. `Card`/`Deck`, `HandEvaluator` (static, evaluates all
+  C(7,5) combos), `Player`, `PokerGame` (blinds, betting, side pots, showdown), and the
+  `GameObserver` / `ConsoleObserver` / `GameAborted` front-end contract. Headless;
+  `PokerGame.DEBUG` gates its printing.
+- `poker/bot.py` — `PokerBot` (equity + position + pot-odds decisions, 5 styles in
+  `PokerBot.TYPES`: TAG/LAG/CTR/NIT/FISH), `BotManager`, `raise_to_total`, and 12
+  `SimpleBot*` fixed-strategy baselines used as tournament controls.
+- `poker/notation.py` — starting-hand notation (`hand_key`, `preflop_key`, `RANK_VALUES`,
+  `all_preflop_keys`, `cards_for_key`). Depends only on `poker.game`, so both `poker.bot`
+  and `poker.equity_cache` can use it without an import cycle. `poker.bot` re-exports
+  `hand_key`/`RANK_VALUES` for callers that already referred to them there.
+- `poker/equity.py` — `WinProbabilityCalculator.calculate_win_probability()`, Monte Carlo,
+  returns `{win_prob, tie_prob, lose_prob, equity}`, plus `get_hand_strength` category
+  bands. The hot path in any tournament involving `PokerBot`s.
+- `poker/equity_cache.py` — `CachedEquityCalculator`, a drop-in for the above. Answers
+  pre-flop from a precomputed table and memoises post-flop for the process. `PokerBot`'s
+  shared calculator is one of these.
+- `poker/hand_log.py` — `HandLog`, a `GameObserver` that writes one row per player per
+  hand plus the action sequence to SQLite, and `FanOutObserver` for attaching it
+  alongside a front-end.
+- `poker/tournament.py` — `BotTournament` (`BOT_FACTORY` registry, optional
+  `hand_log_path`) and `ProgressTracker`.
+- `poker/config.py` — tunable constants plus `PROJECT_ROOT`/`ASSETS_DIR`/`CARDS_DIR`/
+  `PREFLOP_TABLE_PATH`, resolved from `__file__` so paths hold whatever the working
+  directory is. Prefer adding constants here over inlining literals.
+- `poker/ui/game_window.py` — `PokerUI`. Runs the hand loop on a daemon thread and blocks
+  on human input via `self.current_player_action`. `poker/ui/tournament_window.py` is the
+  analytics dashboard.
+- `assets/cards-png-100px/` — card images, one per `<rank><suit-initial>.png` (`10D.png`).
   Public-domain Vector Playing Cards; don't regenerate.
 
 Docs in [docs/](docs/) are design notes written alongside features; they lag the code, so
@@ -51,7 +99,7 @@ trust the source when they disagree.
 ### One hand loop, driven through hooks
 
 `PokerGame.play_hand()` / `betting_round()` is the only betting implementation.
-A front-end supplies a `GameObserver` (`poker_game.py`) and the engine calls its hooks:
+A front-end supplies a `GameObserver` (`poker/game.py`) and the engine calls its hooks:
 `on_hand_start`, `on_blinds`, `on_stage`, `before_ai_action`, `get_human_action`,
 `on_action`, `on_turn_advanced`, `on_showdown`, `on_hand_end`. Every hook defaults to a
 no-op, so tournaments and tests pass no observer at all; a bare `PokerGame` gets
@@ -62,7 +110,8 @@ loop of its own — it renders `on_action` and blocks in `get_human_action` unti
 is pressed. Two things worth knowing when writing an observer:
 
 - **A misspelled hook silently becomes a no-op**, since the base class defines them all.
-  There is a test that asserts `PokerUI` overrides every hook — extend it if you add one.
+  `tests/test_observer.py` asserts `PokerUI` overrides every hook — extend it if you
+  add one.
 - `get_human_action` returns `(action, raise_amount)` and may raise `GameAborted` to
   abandon the hand (the UI does this when its window closes). `before_ai_action` returning
   `False` defers that bot to a later pass, which is how "skip to my turn" works.
@@ -93,25 +142,26 @@ to see the swallowed error, or call `decide_action` directly.
 
 - **Ranks are `'10'`, not `'T'`.** `Card.RANKS` spells ten as the two-character `'10'`,
   but starting-hand notation (and every `SimpleBot*` range constant — `'TT'`, `'AT'`,
-  `'T9o'`) uses `'T'`. Go through `poker_bot.hand_key()` / `RANK_VALUES`, which accept
+  `'T9o'`) uses `'T'`. Go through `poker.notation.hand_key()` / `RANK_VALUES`, which accept
   both and fold `'10'` → `'T'`; don't hand-roll another rank map. This previously raised
   `KeyError: '10'` on any ten, silently swallowed by the fallback above.
 - CI has no failure-swallowing left (`|| echo "… completed"` guards are gone) and every
-  step propagates its exit code, so a red badge now means something. `python
-  check_prints.py` enforces the print-behind-DEBUG convention with an AST walk and a
-  documented allowlist — plain grep matched the `__main__` demos and warned on every run.
-- `run_simple_tournament.py` and `run_large_tournament.py` start with a hardcoded
-  `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — harmless but dead on this
+  step propagates its exit code, so a red badge now means something.
+  `python -m tools.check_prints` enforces the print-behind-DEBUG convention with an AST
+  walk and a documented allowlist — plain grep matched the `__main__` demos and warned on
+  every run.
+- `scripts/run_simple_tournament.py` and `scripts/run_large_tournament.py` start with a
+  hardcoded `sys.path.insert(0, '/home/noahberg/Projects/PokerAI')` — dead on this
   machine; they only work when run from the repo root.
 - Starting-range constants (`TOP_10_PERCENT`, `BOTTOM_50_PERCENT`, `PREMIUM_HANDS`,
   `EARLY_HANDS`/`LATE_HANDS`) must be written in the same high-card-first notation
   `hand_key()` emits, or the entry is simply unreachable and the bot never plays it.
-  `test_bot_ai.test_hand_range_notation` enforces this across every range constant it can
-  find, so a low-card-first typo now fails the suite instead of quietly shrinking a range.
+  `tests/test_bots.py::TestBotRanges` enforces this across every range constant it can
+  find, so a low-card-first typo fails the suite instead of quietly shrinking a range.
 - A raise is expressed as a **total to raise the round bet TO**, never an increment —
   the same thing the log means by "raises to $60". `PokerGame._apply_raise` clamps it to
   `minimum_raise_to()` and to the player's stack, so passing a huge number means all-in.
-  Bots build totals with `poker_bot.raise_to_total(current_bet, to_call, stack, extra)`.
+  Bots build totals with `poker.bot.raise_to_total(current_bet, to_call, stack, extra)`.
 - Equity assertions are Monte Carlo. `WinProbabilityTester` seeds per instance for
   reproducibility, but where a hand's true equity sits within a standard error or two of
   a `get_hand_strength` category edge, assert with `assert_hand_strength_in` and a set of
@@ -122,48 +172,51 @@ to see the swallowed error, or call `decide_action` directly.
   assertions register against a different `GameTester` class and the tally reads zero.
   Failures are counted, not raised (`assert_*` records and returns), so the runner reads
   `GameTester.totals()` and exits 2 if no assertion ran at all.
-- `__pycache__/*.pyc` are committed to the repo despite `.gitignore` listing
-  `__pycache__/` — gitignore does not apply to already-tracked files, so they show up as
-  modified on every run. `git rm -r --cached __pycache__` clears it.
+- Side pots are built from **whole-hand** contributions (`total_bet_by_player`, via
+  `_contributions()`), not `total_bet_this_round`, which `reset_round_bets` clears every
+  street — reading the latter meant showdown saw only the river's betting and the rest of
+  the pot went to nobody. `_contributions()` falls back to the street bet for any player
+  nothing was recorded for, which is how tests build scenarios by assigning
+  `total_bet_this_round` directly. A folded player's chips stay in the pot as dead money;
+  they are simply not eligible to win it.
 
 ## Outstanding work
 
-Agreed but not finished, roughly in the order it should be tackled. The refactor is
-listed before the data work on purpose — building a data layer on top of the duplicated
-betting loop means migrating it twice.
+**1. Build and ship the pre-flop equity table.** `poker/equity_cache.py` and
+`tools/build_equity_table.py` exist, but `poker/data/preflop_equity.json` has not been
+built, so `CachedEquityCalculator` falls back to sampling and three tests in
+`tests/test_equity.py` skip. Run
+`python -m tools.build_equity_table --simulations 10000`; it is 169 hands × 9 opponent
+counts and takes roughly half an hour across 11 workers. Background it with a runner that
+keeps the parent alive — a detached shell `&` kills the coordinator and the workers finish
+into nothing.
 
-**1. Equity cache (the actual speed fix).** Every `PokerBot` decision runs a fresh
-200-hand Monte Carlo: **~78 ms per call**, which is why an exhaustive sweep over the 5 AI
-bots takes ~26 minutes while the 12 simple bots finish in under a second. Preflop is only
-169 canonical hands × 1-9 opponents = **1,521 rows** - precompute once, ship as JSON, load
-at import. Postflop can't be enumerated (~29M flop combinations), so memoise at runtime on
-(canonical hole, sorted board, opponent count). Caveat: this makes bots *deterministic*
-per situation where they currently jitter, so cached results aren't directly comparable
-to existing tournament numbers.
+**2. Retire the legacy suite.** `all_tests.py`, `game_test_suite.py`,
+`win_probability_test_suite.py`, `test_bot_ai.py`, `test_all_bots.py` and
+`test_tourney_quick.py` still sit at the root and duplicate what `tests/` now covers.
+Port anything unique, then delete them and drop the `all_tests.py` step from CI.
 
-**2. SQLite hand log (the data fix).** `bot_tourney.py` advertises "generates ML training
-data" but `save_results` writes only aggregates — win rate, total gain, final stacks — and
-overwrites the same file every run (the committed `tournament_results.json` is a single
-50-hand game). Per-hand rows (hand id, bot type, position, hole cards, board, action
-sequence, pot, net result) are tabular, append-only and query-shaped; `sqlite3` is stdlib,
-so no new dependency. This is for accumulating and querying history across runs — it does
-**not** avoid re-running simulations, which is what item 1 is for.
-
+**3. Refresh README.md.** It still describes the flat layout and the old assertion counts.
 
 ## Conventions
 
-- No test framework — suites are plain scripts using `GameTester`'s `assert_*` helpers
-  (`game_test_suite.py`), which tally results and print a summary. Add cases as
-  `test_*()` functions and call them from that file's `__main__` block; `all_tests.py`
-  picks them up by name. Every tester registers itself on `GameTester._instances`, so
-  `GameTester.totals()` sees assertions from any suite.
+- New tests are `unittest` under `tests/`, discovered by name. Shared helpers live in
+  `tests/support.py`: `card()`/`hand()` build cards from shorthand (`hand("AS 10D")`),
+  `silent_game()` returns a game whose observer does nothing so tests never block on
+  `input()`, `ScriptedObserver` stands in for a front-end, `FixedBot` always returns one
+  action, and `GameScript`/`ScriptedGame` pin the cards dealt.
+- The legacy root suite uses `GameTester`'s `assert_*` helpers, which **record** failures
+  rather than raising. `all_tests.py` therefore imports each suite, calls its `test_*`
+  functions directly and reads `GameTester.totals()`, exiting 2 if no assertion ran at
+  all. Don't switch it to `runpy`: that re-executes the module in a fresh namespace, so
+  assertions register against a different `GameTester` class and the tally reads zero.
 - Equity assertions are Monte Carlo, so bound them on the measured value with room for
-  noise (~0.007 std error at 5,000 simulations); a range hugging the true value within
-  ~3σ will flake.
-- To test engine behaviour deterministically, use `GameScript` + `MockPokerGame` from
-  `game_test_suite.py`: they let you pin hole cards, community cards, and a per-street
-  action sequence. `GameTester.parse_hand("AS KS")` builds cards from strings.
-- Print only behind `DEBUG` / `config.ENABLE_DEBUG` in engine and UI code; CI greps for
-  unguarded `print(` in `poker_game.py`, `poker_ui.py`, `config.py`.
+  noise (~0.007 std error at 5,000 simulations, ~0.01 at 2,500); a bound hugging the true
+  value within ~3σ will flake. Where a hand's real equity sits within a standard error of
+  a `get_hand_strength` category edge, assert a set of acceptable labels instead of one —
+  pinning one there tests the sampler's luck. Seed for reproducibility.
+- Print only behind `DEBUG` / `config.ENABLE_DEBUG` in engine code; `tools/check_prints.py`
+  enforces it over `poker/game.py`, `poker/bot.py`, `poker/equity.py`, `poker/config.py`
+  with a documented allowlist.
 - Type hints are used on newer engine/bot code (`Optional[...]`, `List[Card]`); match the
   surrounding file.
