@@ -54,7 +54,8 @@ class PokerBot:
             )
         return cls._shared_win_prob_calc
     
-    def __init__(self, player_id: int, bot_type: Optional[str] = None):
+    def __init__(self, player_id: int, bot_type: Optional[str] = None,
+                 opponent_model=None):
         """
         Initialize a poker bot
         
@@ -72,6 +73,10 @@ class PokerBot:
         
         # Use shared calculator instead of creating new instance per bot
         self.win_prob_calc = self.get_shared_calculator()
+
+        # A read on how the table has been playing. PokerGame links this in;
+        # None means play the base strategy and adapt to nobody.
+        self.opponent_model = opponent_model
     
     def decide_action(
         self,
@@ -230,6 +235,38 @@ class PokerBot:
         rank = HandEvaluator.HAND_RANKS.get(best_hand[0], 1)
         return rank / 10.0
     
+    def _adjust_to_table(self) -> Tuple[float, float]:
+        """Multipliers for the fold threshold and the raise frequency.
+
+        The two adjustments a read actually justifies:
+
+        * opponents who fold often make betting cheaper, so raise more;
+        * opponents who play many hands turn up with weaker holdings, so there
+          is less reason to fold a marginal one.
+
+        Both are clamped. A read tilts the strategy, it does not replace it, and
+        it stays neutral (1.0, 1.0) until enough hands have been seen - so a bot
+        with no model, or one at a fresh table, plays exactly as it did before.
+
+        Returns (fold_multiplier, raise_multiplier).
+        """
+        if self.opponent_model is None:
+            return 1.0, 1.0
+
+        read = self.opponent_model.table_read(exclude=self.player_id)
+        if not read.reliable:
+            return 1.0, 1.0
+
+        from poker.opponent_model import NEUTRAL_FOLD_TO_BET, NEUTRAL_VPIP
+
+        surrender = read.fold_to_bet - NEUTRAL_FOLD_TO_BET
+        raise_multiplier = _clamp(1.0 + 0.8 * surrender, 0.70, 1.50)
+
+        looseness = read.vpip - NEUTRAL_VPIP
+        fold_multiplier = _clamp(1.0 - 0.5 * looseness, 0.75, 1.30)
+
+        return fold_multiplier, raise_multiplier
+
     def _get_position_multiplier(self, position: str) -> float:
         """
         Get position multiplier for hand selection
@@ -258,6 +295,10 @@ class PokerBot:
         looseness = 1.0 - self.type.tightness
         fold_threshold = (0.20 + (self.type.tightness * 0.25)) * position_multiplier
         fold_threshold = fold_threshold * (0.3 + looseness * 0.5)  # Loose players fold way less
+
+        # Tilt both dials toward how this table has actually been playing.
+        fold_multiplier, raise_multiplier = self._adjust_to_table()
+        fold_threshold *= fold_multiplier
         
         # If checking is available, decide check or bet
         if to_call == 0:
@@ -276,6 +317,7 @@ class PokerBot:
         if equity >= call_threshold or equity > (0.35 - looseness * 0.15):
             # Consider raising - aggressive players raise more often
             raise_probability = self.type.aggression * (0.4 + looseness * 0.4)
+            raise_probability = min(1.0, raise_probability * raise_multiplier)
             if random.random() < raise_probability and hand_strength > (0.3 - looseness * 0.1):
                 raise_to = self._calculate_raise_amount(
                     to_call, player_stack, hand_strength, current_bet
@@ -413,6 +455,10 @@ if __name__ == "__main__":
 # Starting-hand notation lives in poker.notation so poker.equity_cache can use
 # it too. Re-exported here because bots and their tests refer to poker.bot.
 from poker.notation import RANK_VALUES, hand_key  # noqa: E402  (kept for callers)
+
+
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
 
 
 def raise_to_total(current_bet: int, to_call: int, player_stack: int,

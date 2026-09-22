@@ -68,6 +68,12 @@ play.py, run_tournament.py    launchers
 - `poker/bot.py` — `PokerBot` (equity + position + pot-odds decisions, 5 styles in
   `PokerBot.TYPES`: TAG/LAG/CTR/NIT/FISH), `BotManager`, `raise_to_total`, and 12
   `SimpleBot*` fixed-strategy baselines used as tournament controls.
+- `poker/opponent_model.py` — `OpponentModel`, a `GameObserver` that profiles every
+  seat (VPIP, pre-flop raise, aggression, fold-to-a-bet) by watching hands go by, and
+  hands bots an aggregate `table_read()`. Every `PokerGame` owns one: the front-end the
+  caller passes is wrapped with the model in a `FanOutObserver`, so `game.observer` is
+  that pair and `game.front_end` is the caller's own. Reads stay neutral until a seat has
+  been watched for `MIN_HANDS`.
 - `poker/notation.py` — starting-hand notation (`hand_key`, `preflop_key`, `RANK_VALUES`,
   `all_preflop_keys`, `cards_for_key`). Depends only on `poker.game`, so both `poker.bot`
   and `poker.equity_cache` can use it without an import cycle. `poker.bot` re-exports
@@ -188,6 +194,10 @@ Nothing outstanding from the last round. Worth knowing for whatever comes next:
 - Bots are now **deterministic pre-flop**, since equity comes from the table rather than
   a fresh sample. Reproducible, but tournament numbers from before the table are not
   comparable with numbers from after it.
+- `PokerBot._adjust_to_table()` returns bounded multipliers (fold 0.75-1.30, raise
+  0.70-1.50) and exactly `(1.0, 1.0)` with no model or a thin sample, so a read tilts the
+  strategy rather than replacing it and existing behaviour is unchanged where there is no
+  evidence. Keep any new dial bounded the same way.
 - `docs/` still describes the pre-reorganisation layout and the deleted root suite. Those
   are historical design notes, not instructions; trust the source.
 - `tools/equity_heatmap.py` renders the table as a 13x13 range chart (suited above the

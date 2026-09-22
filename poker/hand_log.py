@@ -241,66 +241,6 @@ class HandLog(GameObserver):
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
-class FanOutObserver(GameObserver):
-    """Sends every hook to several observers in turn.
-
-    Lets a front-end and a :class:`HandLog` watch the same game::
-
-        game = PokerGame(observer=FanOutObserver(ui, hand_log))
-
-    Hooks are written out explicitly rather than generated through
-    ``__getattr__``: GameObserver already defines every hook name, so attribute
-    lookup would find the inherited no-op and the dynamic version would never
-    run.
-    """
-
-    def __init__(self, *observers):
-        self.observers = [o for o in observers if o is not None]
-
-    def on_hand_start(self, game):
-        for o in self.observers:
-            o.on_hand_start(game)
-
-    def on_blinds(self, game, small_blind_player, big_blind_player):
-        for o in self.observers:
-            o.on_blinds(game, small_blind_player, big_blind_player)
-
-    def on_stage(self, game, stage):
-        for o in self.observers:
-            o.on_stage(game, stage)
-
-    def on_action(self, game, player, action, amount, stage):
-        for o in self.observers:
-            o.on_action(game, player, action, amount, stage)
-
-    def on_turn_advanced(self, game, stage):
-        for o in self.observers:
-            o.on_turn_advanced(game, stage)
-
-    def on_showdown(self, game):
-        for o in self.observers:
-            o.on_showdown(game)
-
-    def on_hand_end(self, game, winner_info):
-        for o in self.observers:
-            o.on_hand_end(game, winner_info)
-
-    def before_ai_action(self, game, player, to_call, stage):
-        """Every observer must agree before a bot is passed over."""
-        return all(o.before_ai_action(game, player, to_call, stage)
-                   for o in self.observers)
-
-    def get_human_action(self, game, player, to_call, stage):
-        """Exactly one observer can answer; the first real answer wins.
-
-        A HandLog inherits the base implementation, so it must not be the one
-        that answers - hence the check for an observer that actually overrides
-        the hook.
-        """
-        for observer in self.observers:
-            if type(observer).get_human_action is GameObserver.get_human_action:
-                continue
-            return observer.get_human_action(game, player, to_call, stage)
-        raise RuntimeError(
-            "no observer supplies human actions; a non-AI seat cannot act"
-        )
+# FanOutObserver lives in poker.game so the engine can use it without importing
+# this module; re-exported here because callers already reach for it by this name.
+from poker.game import FanOutObserver  # noqa: E402,F401  (kept for callers)

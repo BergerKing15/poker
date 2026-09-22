@@ -108,7 +108,18 @@ class TestHumanActions(unittest.TestCase):
 class TestDefaults(unittest.TestCase):
     def test_bare_game_gets_a_console_observer(self):
         game = PokerGame(num_players=2, use_bots=False)
-        self.assertIsInstance(game.observer, ConsoleObserver)
+        self.assertIsInstance(game.front_end, ConsoleObserver)
+
+    def test_the_opponent_model_listens_behind_the_front_end(self):
+        """A game always watches its own seats, whatever front-end it has."""
+        from poker.opponent_model import OpponentModel
+
+        observer = ScriptedObserver([("check", None)] * 12)
+        game = PokerGame(num_players=2, use_bots=True, observer=observer)
+        self.assertIsInstance(game.opponent_model, OpponentModel)
+        game.play_hand()
+        self.assertEqual(game.opponent_model.hands_observed, 1)
+        self.assertIn("hand_start", observer.events)
 
     def test_base_observer_hooks_are_all_no_ops(self):
         observer = GameObserver()

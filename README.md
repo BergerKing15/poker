@@ -123,6 +123,10 @@ keeping a copy of it.
   - 12 `SimpleBot*` fixed-strategy baselines used as controls
 - **poker/notation.py**: Starting-hand notation (`AA`, `AKs`, `T9o`) and the 169-hand
   enumeration
+- **poker/opponent_model.py**: Profiles every seat from play alone - VPIP, pre-flop raise,
+  aggression and fold-to-a-bet - and classifies it tight/loose x passive/aggressive. Bots
+  raise more against opponents who fold and bluff less against those who never do, within
+  bounded limits and only once enough hands have been seen
 
 ### Equity
 - **poker/equity.py**: `WinProbabilityCalculator`, Monte Carlo, returns win/tie/lose/equity
@@ -326,7 +330,8 @@ This poker game implementation is provided as-is for educational purposes. The p
 
 ### 🧠 Machine Learning Integration
 - [x] **Hand History Database**: Per-hand SQLite records to train on (`poker/hand_log.py`)
-- [ ] **Opponent Modeling**: Track AI opponent patterns and adapt strategy
+- [x] **Opponent Modeling**: Per-seat VPIP/aggression/fold-to-bet profiling that bots
+  adapt to (`poker/opponent_model.py`)
 - [ ] **Neural Network Hand Evaluation**: Learn hand strength beyond heuristics
 - [ ] **Reinforcement Learning**: Self-play training for AI improvement
 - [ ] **Clustering Algorithm**: Group similar game situations for faster lookup

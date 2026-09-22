@@ -184,6 +184,71 @@ class GameObserver:
         """The pot has been awarded."""
 
 
+class FanOutObserver(GameObserver):
+    """Sends every hook to several observers in turn.
+
+    Lets a front-end and a :class:`HandLog` watch the same game::
+
+        game = PokerGame(observer=FanOutObserver(ui, hand_log))
+
+    Hooks are written out explicitly rather than generated through
+    ``__getattr__``: GameObserver already defines every hook name, so attribute
+    lookup would find the inherited no-op and the dynamic version would never
+    run.
+    """
+
+    def __init__(self, *observers):
+        self.observers = [o for o in observers if o is not None]
+
+    def on_hand_start(self, game):
+        for o in self.observers:
+            o.on_hand_start(game)
+
+    def on_blinds(self, game, small_blind_player, big_blind_player):
+        for o in self.observers:
+            o.on_blinds(game, small_blind_player, big_blind_player)
+
+    def on_stage(self, game, stage):
+        for o in self.observers:
+            o.on_stage(game, stage)
+
+    def on_action(self, game, player, action, amount, stage):
+        for o in self.observers:
+            o.on_action(game, player, action, amount, stage)
+
+    def on_turn_advanced(self, game, stage):
+        for o in self.observers:
+            o.on_turn_advanced(game, stage)
+
+    def on_showdown(self, game):
+        for o in self.observers:
+            o.on_showdown(game)
+
+    def on_hand_end(self, game, winner_info):
+        for o in self.observers:
+            o.on_hand_end(game, winner_info)
+
+    def before_ai_action(self, game, player, to_call, stage):
+        """Every observer must agree before a bot is passed over."""
+        return all(o.before_ai_action(game, player, to_call, stage)
+                   for o in self.observers)
+
+    def get_human_action(self, game, player, to_call, stage):
+        """Exactly one observer can answer; the first real answer wins.
+
+        A HandLog inherits the base implementation, so it must not be the one
+        that answers - hence the check for an observer that actually overrides
+        the hook.
+        """
+        for observer in self.observers:
+            if type(observer).get_human_action is GameObserver.get_human_action:
+                continue
+            return observer.get_human_action(game, player, to_call, stage)
+        raise RuntimeError(
+            "no observer supplies human actions; a non-AI seat cannot act"
+        )
+
+
 class ConsoleObserver(GameObserver):
     """Prompts a human at the terminal. The default for a bare PokerGame."""
 
@@ -221,7 +286,13 @@ class PokerGame:
         # Size of the last bet or raise this round; sets the minimum re-raise.
         self.last_raise_size = big_blind
         # Front-end hooks; ConsoleObserver keeps the terminal demo working.
-        self.observer = observer if observer is not None else ConsoleObserver()
+        self.front_end = observer if observer is not None else ConsoleObserver()
+        # Every game keeps a read on how its seats play. Imported here rather
+        # than at module scope because poker.opponent_model imports this module.
+        from poker.opponent_model import OpponentModel
+        self.opponent_model = OpponentModel()
+        # The engine talks to one observer; the model listens in behind it.
+        self.observer = FanOutObserver(self.opponent_model, self.front_end)
         
         # Bot system
         self.use_bots = use_bots
@@ -267,6 +338,16 @@ class PokerGame:
     def get_active_opponents(self, excluding_player) -> List:
         """Get active players excluding the specified player"""
         return [p for p in self.get_active_players() if p != excluding_player]
+
+    def link_opponent_model(self) -> None:
+        """Hand this game's read to any bot that knows what to do with one.
+
+        Tournaments replace `self.bots` wholesale after construction, so the
+        link is refreshed each hand rather than made once in the constructor.
+        """
+        for bot in self.bots.values():
+            if getattr(bot, "opponent_model", "missing") is None:
+                bot.opponent_model = self.opponent_model
 
     def _record_contribution(self, player, amount: int) -> None:
         """Track what a player has put in across the whole hand.
@@ -795,6 +876,7 @@ class PokerGame:
     def play_hand(self):
         """Play a single hand of poker and return the winner info."""
         self.hand_number += 1
+        self.link_opponent_model()
         if self.DEBUG:
             print("=" * 50)
             print(f"HAND #{self.hand_number}")
