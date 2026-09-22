@@ -31,18 +31,28 @@ AI_DELAY_INCREMENT = 0.1
 # Simulations a bot runs per post-flop decision. Pre-flop costs nothing now
 # (it reads the precomputed table), so this is the whole runtime cost of a bot.
 #
-# Measured trade-off, six-handed, against a 20,000-simulation reference:
+# Set to the most precision that still sustains 250+ hands/minute six-handed,
+# which is the throughput the project claims. Measured against a
+# 20,000-simulation reference, over 250-hand runs (shorter runs understate
+# throughput badly - the post-flop memo needs time to warm up):
 #
-#   sims   ms/call   RMS equity error   estimates >0.05 off
-#    200      55.8              0.029                   11%
-#    100      26.7              0.045                   27%
-#     50      14.4              0.057                   32%
-#     25       7.5              0.085                   58%
+#   sims   RMS equity error   >0.05 off   worst run (hands/min)
+#    100              0.041         22%                    587
+#    200              0.030         10%                   ~350
+#    300              0.025          5%                    328
+#    325              0.023          4%                    273
+#    350              0.023          4%                    210  <- misses 250
+#    500              0.018          2%                    182
 #
-# Cost is linear in the count; accuracy falls off a cliff below 50. Calling a
-# pot-sized bet needs about 33% equity, so an error past 0.05 near that line
-# flips call into fold - which is what the last column is really counting.
-BOT_SIMULATIONS = 100
+# 325 is the highest that cleared 250 on every run, but only by 9%. 300 keeps
+# a 31% margin, which matters because this is single-threaded and a slower
+# machine lands below these figures.
+#
+# Calling a pot-sized bet needs about 33% equity, so an error past 0.05 near
+# that line turns a call into a fold - that is what the third column counts.
+# Raising this number costs throughput and nothing else; lowering it makes the
+# bots measurably worse, not merely faster.
+BOT_SIMULATIONS = 300
 
 NUM_SIMULATIONS_SETUP = 5000  # simulations during gameplay
 NUM_SIMULATIONS_SETUP_SCREEN = 10000  # simulations for info/testing
