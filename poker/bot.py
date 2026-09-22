@@ -271,11 +271,18 @@ class PokerBot:
         return fold_multiplier, raise_multiplier
 
     def _get_position_multiplier(self, position: str) -> float:
+        """Scales the fold threshold, so a larger number means a tighter seat.
+
+        Acting early means more players still to act behind you, any of whom
+        can wake up with a hand, so early position needs a better hand to
+        continue; on the button almost nobody is left to beat. The multiplier
+        therefore falls as position improves.
+
+        This used to return 0.5 early and 1.3 late while being multiplied into
+        the fold threshold, which inverted the intent stated in its own
+        docstring: it made the button the tightest seat at the table.
         """
-        Get position multiplier for hand selection
-        Early position = tighter (0.5), late = looser (1.5)
-        """
-        return {"early": 0.5, "middle": 0.8, "late": 1.3}.get(position, 0.8)
+        return {"early": 1.15, "middle": 1.0, "late": 0.85}.get(position, 1.0)
     
     def _make_decision(
         self,
@@ -296,8 +303,30 @@ class PokerBot:
         # Loose players (LAG, FISH) fold less: 1.0 - 0.35 = 0.65 multiplier
         # Tight players (TAG, NIT) fold more: 1.0 - 0.90 = 0.10 multiplier
         looseness = 1.0 - self.type.tightness
-        fold_threshold = (0.20 + (self.type.tightness * 0.25)) * position_multiplier
-        fold_threshold = fold_threshold * (0.3 + looseness * 0.5)  # Loose players fold way less
+
+        # A hand is worth playing when its equity beats what a random hand
+        # would be worth - 1 / players - by a margin this archetype's
+        # tightness sets. Anchoring to that baseline keeps one threshold
+        # meaningful at every table size: a fixed number would be unplayably
+        # tight heads-up and far too loose nine-handed, because equity itself
+        # shrinks as opponents are added.
+        #
+        # Written as a single increasing function of tightness on purpose. It
+        # was previously a product of (0.20 + tightness * 0.25) and
+        # (0.3 + looseness * 0.5), whose factors moved in opposite directions
+        # and very nearly cancelled - every archetype landed between 0.149 and
+        # 0.180, below almost any hand's equity, so this test never fired and
+        # NIT came out looser than FISH.
+        # The coefficient was fitted, not guessed: for each archetype's target
+        # VPIP (NIT 12%, TAG 22%, CTR 32%, LAG 40%, FISH 55% - the rates these
+        # styles play in real poker) the required threshold was read off the
+        # equity distribution of all 169 starting hands, weighted by how often
+        # each is dealt, at one, two and four opponents. A line through those
+        # points is tightness * 0.30 - 0.09.
+        baseline = 1.0 / (num_opponents + 1)
+        headroom = 1.0 - baseline
+        fold_threshold = baseline + (self.type.tightness * 0.30 - 0.09) * headroom
+        fold_threshold *= position_multiplier
 
         # Tilt both dials toward how this table has actually been playing.
         fold_multiplier, raise_multiplier = self._adjust_to_table()

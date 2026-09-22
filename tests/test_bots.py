@@ -159,12 +159,28 @@ class TestPokerBot(unittest.TestCase):
         bot = PokerBot(0, "TAG")
         self.assertGreater(bot._preflop_hand_strength(hand("10S 10H")), 0)
 
-    def test_position_multiplier_rises_with_position(self):
+    def test_late_position_plays_more_hands(self):
+        """Position must change behaviour, and in the direction poker requires.
+
+        The multiplier scales the fold threshold, so it falls as position
+        improves. Asserted through the fold rate rather than the raw number,
+        because the old version had the multiplier ordered the other way and
+        still passed a test that only checked the number.
+        """
+        import random
+
         bot = PokerBot(0, "TAG")
-        self.assertLess(bot._get_position_multiplier("early"),
-                        bot._get_position_multiplier("middle"))
-        self.assertLess(bot._get_position_multiplier("middle"),
-                        bot._get_position_multiplier("late"))
+        rates = {}
+        for position in ("early", "middle", "late"):
+            random.seed(11)
+            folds = sum(
+                bot.decide_action(hand("9S 8H"), [], 20, 10, 1000, 30,
+                                  position, 2, 5, 10)[0] == "fold"
+                for _ in range(200)
+            )
+            rates[position] = folds / 200
+        self.assertGreater(rates["early"], rates["late"],
+                           f"early should fold more than late, got {rates}")
 
     def test_calculators_are_shared_between_bots(self):
         first, second = PokerBot(0, "TAG"), PokerBot(1, "NIT")

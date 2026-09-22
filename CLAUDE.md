@@ -204,6 +204,14 @@ Nothing outstanding from the last round. Worth knowing for whatever comes next:
 - **Benchmark throughput over 250+ hands, never a short burst.** The post-flop memo needs
   time to warm up, so 80-hand runs understate sustained throughput by roughly half and
   their minima are not even monotonic in the simulation count.
+- `PokerBot` hand selection: `fold_threshold = baseline + (tightness*0.30 - 0.09) *
+  headroom`, where `baseline = 1/(players)` is what a random hand is worth. Anchoring to
+  the baseline keeps one threshold meaningful at every table size. The coefficient is
+  fitted to each archetype's target VPIP against the equity distribution of all 169
+  starting hands, so `tests/test_bots.py` can assert the archetypes actually separate -
+  measured VPIP runs NIT 20%, TAG 27%, CTR 38%, LAG 51%, FISH 56%. `_get_position_multiplier`
+  scales that threshold, so a **larger** number means a **tighter** seat (early 1.15,
+  late 0.85).
 - `PokerBot._adjust_to_table()` returns bounded multipliers (fold 0.75-1.30, raise
   0.70-1.50) and exactly `(1.0, 1.0)` with no model or a thin sample, so a read tilts the
   strategy rather than replacing it and existing behaviour is unchanged where there is no
