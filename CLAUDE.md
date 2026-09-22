@@ -194,6 +194,13 @@ Nothing outstanding from the last round. Worth knowing for whatever comes next:
 - Bots are now **deterministic pre-flop**, since equity comes from the table rather than
   a fresh sample. Reproducible, but tournament numbers from before the table are not
   comparable with numbers from after it.
+- `config.BOT_SIMULATIONS` (default 100) is the whole runtime cost of a bot: pre-flop is
+  a table lookup, so this only buys post-flop precision. Cost is linear in the count,
+  accuracy is not - RMS equity error is 0.029 at 200, 0.045 at 100, 0.085 at 25. Since
+  calling a pot-sized bet needs ~33% equity, an error past 0.05 flips call into fold, so
+  going below 50 makes the bots measurably worse, not just faster. Six-handed throughput
+  is noisy either way (587-1,201 hands/min at 100) because it depends on how many
+  post-flop spots come up.
 - `PokerBot._adjust_to_table()` returns bounded multipliers (fold 0.75-1.30, raise
   0.70-1.50) and exactly `(1.0, 1.0)` with no model or a thin sample, so a read tilts the
   strategy rather than replacing it and existing behaviour is unchanged where there is no

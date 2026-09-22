@@ -41,7 +41,7 @@ class PokerBot:
     _shared_win_prob_calc = None
     
     @classmethod
-    def get_shared_calculator(cls, num_simulations=200):
+    def get_shared_calculator(cls, num_simulations=None):
         """Get or create the shared equity calculator.
 
         Cached: pre-flop answers come from a pre-computed table and post-flop
@@ -49,6 +49,9 @@ class PokerBot:
         applies to situations the caches miss.
         """
         if cls._shared_win_prob_calc is None:
+            if num_simulations is None:
+                from poker.config import BOT_SIMULATIONS
+                num_simulations = BOT_SIMULATIONS
             cls._shared_win_prob_calc = CachedEquityCalculator(
                 num_simulations=num_simulations
             )
